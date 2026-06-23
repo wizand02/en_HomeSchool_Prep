@@ -222,6 +222,64 @@ def process_reading_excel(sheets_dict):
     return sheets_dict
 
 
+def translate_polite(translator, text):
+    """구글 번역 시 존댓말(높임말)로 유도하고, 번역 후 간단히 평서문 어미를 높임말로 교정"""
+    text_str = str(text).strip()
+    if not text_str:
+        return ""
+    
+    if text_str.endswith(':'):
+        return text_str
+        
+    # 문장 기호 추출 및 본문 분리
+    punc = ""
+    if text_str[-1] in ['.', '!', '?']:
+        punc = text_str[-1]
+        raw_body = text_str[:-1].strip()
+    else:
+        raw_body = text_str
+    
+    # "Please, " 접두사를 붙여 존댓말 뉘앙스 유도
+    polite_text = f"Please, {raw_body}{punc}"
+    
+    try:
+        translated = translator.translate(polite_text)
+        
+        # 불필요한 번역 잔재 제거
+        translated = re.sub(r"^(제발|부디|부탁합니다|부탁드립니다|바랍니다)[,\s]*", "", translated)
+        translated = re.sub(r"[,\s]*(제발|부디|부탁합니다|부탁드립니다|바랍니다)$", "", translated)
+        
+        # 대표적인 평서문 반말 어미 치환 교정
+        replacements = {
+            r"했다\.": "했습니다.",
+            r"한다\.": "합니다.",
+            r"이다\.": "입니다.",
+            r"된다\.": "됩니다.",
+            r"않는다\.": "않습니다.",
+            r"없다\.": "없습니다.",
+            r"있다\.": "있습니다.",
+            r"오다\.": "옵니다.",
+            r"가다\.": "갑니다.",
+            r"먹다\.": "먹습니다.",
+            r"보다\.": "봅니다.",
+            r"알다\.": "압니다.",
+            r"모르다\.": "모릅니다.",
+            r"좋다\.": "좋습니다.",
+            r"싫다\.": "싫습니다.",
+            r"같다\.": "같습니다.",
+            r"아니다\.": "아닙니다.",
+        }
+        for pattern, repl in replacements.items():
+            translated = re.sub(pattern, repl, translated)
+        
+        return translated.strip()
+    except Exception as e:
+        try:
+            return translator.translate(text_str)
+        except:
+            return ""
+
+
 def process_listening_excel(sheets_dict):
     """리스닝 파일의 모든 워크시트('본문', '단어') 처리"""
     try:
@@ -249,7 +307,8 @@ def process_listening_excel(sheets_dict):
                         df.iat[index, 4] = val_d
                     else:
                         try:
-                            df.iat[index, 4] = translator.translate(val_d)
+                            # 높임말 번역 호출
+                            df.iat[index, 4] = translate_polite(translator, val_d)
                         except Exception as e:
                             st.warning(f"본문 번역 오류 (행 {index+2}): {e}")
             progress_bar.progress((index + 1) / len(df))
@@ -361,12 +420,18 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 body_text = p_text[len(first_word_raw):].strip().lstrip(":").strip()
                 
                 sentences = nltk.sent_tokenize(body_text)
-                for sent in sentences:
-                    sent_text = f"{speaker_name}: {sent}"
-                    try:
-                        meaning = translator.translate(sent_text)
-                    except:
-                        meaning = ""
+                for idx, sent in enumerate(sentences):
+                    # 첫 번째 문장에만 화자 이름 결합, 이후 문장은 본문만
+                    if idx == 0:
+                        sent_text = f"{speaker_name}: {sent}"
+                    else:
+                        sent_text = sent
+                        
+                    meaning = translate_polite(translator, sent)
+                    if idx == 0:
+                        meaning_text = f"{speaker_name}: {meaning}"
+                    else:
+                        meaning_text = meaning
                     
                     sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
                     data.append({
@@ -374,7 +439,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         "B": current_unit,
                         "C": sentence_no,
                         "D": sent_text,
-                        "E": meaning,
+                        "E": meaning_text,
                         "F": sound_path
                     })
                     sentence_no += 1
@@ -386,12 +451,17 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 speaker = match.group(1).strip()
                 body = match.group(2).strip()
                 sentences = nltk.sent_tokenize(body)
-                for sent in sentences:
-                    sent_text = f"{speaker} {sent}"
-                    try:
-                        meaning = translator.translate(sent_text)
-                    except:
-                        meaning = ""
+                for idx, sent in enumerate(sentences):
+                    if idx == 0:
+                        sent_text = f"{speaker} {sent}"
+                    else:
+                        sent_text = sent
+                        
+                    meaning = translate_polite(translator, sent)
+                    if idx == 0:
+                        meaning_text = f"{speaker} {meaning}"
+                    else:
+                        meaning_text = meaning
                     
                     sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
                     data.append({
@@ -399,7 +469,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         "B": current_unit,
                         "C": sentence_no,
                         "D": sent_text,
-                        "E": meaning,
+                        "E": meaning_text,
                         "F": sound_path
                     })
                     sentence_no += 1
@@ -407,10 +477,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 # 일반 서술문
                 sentences = nltk.sent_tokenize(p_text)
                 for sent in sentences:
-                    try:
-                        meaning = translator.translate(sent)
-                    except:
-                        meaning = ""
+                    meaning = translate_polite(translator, sent)
                     
                     sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
                     data.append({
@@ -1126,8 +1193,8 @@ with tab7:
     # 실시간 미리보기 기능 추가
     if manual_listen_body:
         st.write("---")
-        st.write("### 🔍 입력 본문 미리보기 (화자 강조)")
-        st.info("💡 화자 이름이 빨간색 볼드체로 표시됩니다. 줄바꿈(문단 구분) 상태를 확인 후 하단의 엑셀 생성 버튼을 눌러주세요.")
+        st.write("### 🔍 입력 본문 미리보기 (화자 강조 및 편집)")
+        st.info("💡 아래 박스에서 직접 문장을 수정하거나 줄바꿈을 편집할 수 있습니다. 편집 후 [✍️ 줄바꿈 수정사항 본문에 반영하기] 버튼을 클릭하세요.")
         
         # 화자 목록 파싱
         speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
@@ -1140,10 +1207,59 @@ with tab7:
                 pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
                 preview_html = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html)
         
-        st.markdown(
-            f'<div style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6;">{preview_html}</div>', 
-            unsafe_allow_html=True
-        )
+        # iframe 높이를 본문 길이에 따라 유동적으로 계산 (최소 200px, 최대 600px)
+        lines_count = len(manual_listen_body.split('\n'))
+        iframe_height = min(max(200, lines_count * 24 + 100), 600)
+        
+        editor_html = f"""
+        <div id="editor" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; outline:none; color:inherit; background-color:transparent;">
+            {preview_html}
+        </div>
+        <div style="margin-top: 10px;">
+            <button id="apply-btn" style="padding: 8px 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
+                ✍️ 줄바꿈 수정사항 본문에 반영하기
+            </button>
+        </div>
+
+        <script>
+        document.getElementById('apply-btn').addEventListener('click', () => {{
+            const editor = document.getElementById('editor');
+            const editedText = editor.innerText;
+            
+            try {{
+                const parentDocs = window.parent.document;
+                const textareas = parentDocs.querySelectorAll('textarea');
+                let targetTextarea = null;
+                
+                for (let ta of textareas) {{
+                    if (ta.placeholder && ta.placeholder.includes("여기에 대화 내용을 붙여넣으세요")) {{
+                        targetTextarea = ta;
+                        break;
+                    }}
+                }}
+                
+                if (targetTextarea) {{
+                    // React value setter trigger
+                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                    nativeTextAreaValueSetter.call(targetTextarea, editedText);
+                    
+                    const event = new Event('input', {{ bubbles: true }});
+                    targetTextarea.dispatchEvent(event);
+                    
+                    alert('✅ 수정사항이 본문 입력창에 성공적으로 반영되었습니다!');
+                }} else {{
+                    navigator.clipboard.writeText(editedText);
+                    alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
+                }}
+            }} catch (e) {{
+                navigator.clipboard.writeText(editedText);
+                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력창에 전체 붙여넣기(Ctrl+V) 해주세요!');
+            }}
+        }});
+        </script>
+        """
+        
+        st.components.v1.html(editor_html, height=iframe_height)
         st.write("---")
 
     if st.button("▶ 리스닝 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
