@@ -279,7 +279,7 @@ def process_listening_excel(sheets_dict):
     return sheets_dict
 
 
-def parse_listening_paragraphs(paragraphs, filename_base, current_unit):
+def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers=None):
     """리스닝 스크립트(문단 리스트)를 문장별로 분할하여 데이터를 정제"""
     try:
         from deep_translator import GoogleTranslator
@@ -300,6 +300,9 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit):
 
     data = []
     sentence_no = 1
+
+    # speakers 소문자 리스트화
+    speakers_lower = [s.strip().lower() for s in speakers] if speakers else []
 
     for i, p_text in enumerate(paragraphs):
         p_text = p_text.strip()
@@ -325,7 +328,39 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit):
                 "F": sound_path
             })
             sentence_no += 1
-        else:
+            continue
+
+        # 1. 수동 입력 시 화자 목록이 제공되었고, 첫 단어가 화자 목록에 있는 경우
+        is_speaker_found = False
+        words = p_text.split()
+        if speakers_lower and words:
+            first_word_raw = words[0]
+            first_word_clean = re.sub(r"[^A-Za-z0-9]", "", first_word_raw).lower()
+            if first_word_clean in speakers_lower:
+                is_speaker_found = True
+                speaker_name = first_word_raw.rstrip(":")
+                body_text = p_text[len(first_word_raw):].strip().lstrip(":").strip()
+                
+                sentences = nltk.sent_tokenize(body_text)
+                for sent in sentences:
+                    sent_text = f"{speaker_name}: {sent}"
+                    try:
+                        meaning = translator.translate(sent_text)
+                    except:
+                        meaning = ""
+                    
+                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    data.append({
+                        "A": filename_base,
+                        "B": current_unit,
+                        "C": sentence_no,
+                        "D": sent_text,
+                        "E": meaning,
+                        "F": sound_path
+                    })
+                    sentence_no += 1
+
+        if not is_speaker_found:
             # "Sally: Hello..." 같은 형식 판별
             match = re.match(r"^([A-Za-z0-9\s\-]+:)(.*)", p_text)
             if match:
@@ -1055,7 +1090,7 @@ with tab6:
 # ==========================================
 with tab7:
     st.markdown("""
-    교재 제목, 단원 제목, 그리고 대화 스크립트를 직접 입력하여 리스닝용 엑셀 파일로 변환합니다.
+    교재 제목, 단원 제목, 화자 목록, 그리고 대화 스크립트를 직접 입력하여 리스닝용 엑셀 파일로 변환합니다.
     """)
     
     col1_l, col2_l = st.columns(2)
@@ -1064,6 +1099,7 @@ with tab7:
     with col2_l:
         manual_listen_unit_nm = st.text_input("📑 단원 제목", placeholder="예: Unit 1. Nice to Meet You", key="input_l_unit_nm")
         
+    manual_listen_speakers = st.text_input("👤 화자 목록 (쉼표로 구분)", placeholder="예: Sally, John, Teacher", key="input_l_speakers")
     manual_listen_body = st.text_area("📝 본문 입력 (여러 줄)", height=350, placeholder="여기에 대화 내용을 붙여넣으세요...", key="input_l_body")
 
     if st.button("▶ 리스닝 입력 완료 및 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
@@ -1074,7 +1110,10 @@ with tab7:
                 try:
                     paragraphs = [p.strip() for p in manual_listen_body.split('\n') if p.strip()]
                     
-                    manual_listen_data = parse_listening_paragraphs(paragraphs, manual_listen_book_nm, manual_listen_unit_nm)
+                    # 화자 목록 파싱
+                    speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
+                    
+                    manual_listen_data = parse_listening_paragraphs(paragraphs, manual_listen_book_nm, manual_listen_unit_nm, speakers=speakers)
                     
                     if manual_listen_data:
                         manual_listen_df = pd.DataFrame(manual_listen_data)
