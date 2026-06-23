@@ -448,14 +448,19 @@ with tab2:
         "READING_BOOK_NM", "READING_UNIT_NM", 
         "READING_VOCA", "READING_VOCA_MEANING", "READING_VOCA_SOUND_FILE"
     ]
+    template_links_cols = [
+        "title", "link", "teacher_only"
+    ]
     
     df_main_template = pd.DataFrame(columns=template_main_cols)
     df_voca_template = pd.DataFrame(columns=template_voca_cols)
+    df_links_template = pd.DataFrame(columns=template_links_cols)
     
     template_buffer = io.BytesIO()
     with pd.ExcelWriter(template_buffer, engine='openpyxl') as writer:
         df_main_template.to_excel(writer, sheet_name='본문', index=False)
         df_voca_template.to_excel(writer, sheet_name='단어', index=False)
+        df_links_template.to_excel(writer, sheet_name='links', index=False)
     
     st.download_button(
         label="📄 리딩 파일 템플릿(.xlsx) 다운로드",
