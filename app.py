@@ -184,6 +184,9 @@ def process_reading_excel(sheets_dict):
         while len(df.columns) < 5:
             df[f"Column_{len(df.columns)}"] = ""
         
+        # E열 데이터타입을 object로 변환하여 float64 에러 방지
+        df.iloc[:, 4] = df.iloc[:, 4].astype(object)
+        
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
             val_d = str(df.iat[index, 3]).strip() if not pd.isna(df.iat[index, 3]) else ""
@@ -205,6 +208,9 @@ def process_reading_excel(sheets_dict):
         while len(df.columns) < 4:
             df[f"Column_{len(df.columns)}"] = ""
             
+        # D열 데이터타입을 object로 변환하여 float64 에러 방지
+        df.iloc[:, 3] = df.iloc[:, 3].astype(object)
+        
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
             val_c = str(df.iat[index, 2]).strip() if not pd.isna(df.iat[index, 2]) else ""
@@ -253,6 +259,9 @@ def process_listening_excel(sheets_dict):
         while len(df.columns) < 5:
             df[f"Column_{len(df.columns)}"] = ""
         
+        # E열 데이터타입을 object로 변환하여 float64 에러 방지
+        df.iloc[:, 4] = df.iloc[:, 4].astype(object)
+        
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
             val_d = str(df.iat[index, 3]).strip() if not pd.isna(df.iat[index, 3]) else ""
@@ -292,6 +301,9 @@ def process_listening_excel(sheets_dict):
         while len(df.columns) < 4:
             df[f"Column_{len(df.columns)}"] = ""
             
+        # D열 데이터타입을 object로 변환하여 float64 에러 방지
+        df.iloc[:, 3] = df.iloc[:, 3].astype(object)
+        
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
             val_c = str(df.iat[index, 2]).strip() if not pd.isna(df.iat[index, 2]) else ""
