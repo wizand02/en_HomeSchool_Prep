@@ -647,6 +647,113 @@ def generate_sounds(df, base_output_dir):
 st.set_page_config(page_title="영어 학습 자료 도구 세트", layout="wide")
 st.title("🎧 영어 학습 자료 처리 도구")
 
+# CORS 우회를 위한 부모 창 리스너 주입 (onerror 트릭)
+inject_js = """
+<img src="x" onerror="
+if (!window.hasStreamlitListener) {
+    window.hasStreamlitListener = true;
+    console.log('Streamlit CORS Bridge Listener Initialized');
+    
+    // 1. 인풋창 락 주기적 감시 및 처리 (부모 창 컨텍스트이므로 보안 에러 없음)
+    function lockInputs() {
+        try {
+            const labels = document.querySelectorAll('label');
+            for (let label of labels) {
+                const text = label.innerText.trim();
+                if (text.startsWith('시작(초) #') || text.startsWith('종료(초) #')) {
+                    const htmlFor = label.getAttribute('for');
+                    const input = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=&quot;stNumberInput&quot;]').querySelector('input[type=&quot;number&quot;]');
+                    if (input && !input.readOnly && document.activeElement !== input) {
+                        input.readOnly = true;
+                        input.style.pointerEvents = 'none';
+                        input.style.backgroundColor = '#161a24';
+                        input.style.color = '#a3a8b4';
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+    setInterval(lockInputs, 500);
+
+    // 2. 메시지 수신 리스너 등록
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data) return;
+        
+        // 인풋 값 설정 요청 처리
+        if (data.type === 'SET_INPUT_VALUE') {
+            const labelText = data.label;
+            const val = data.value;
+            
+            const labels = document.querySelectorAll('label');
+            let targetInput = null;
+            for (let label of labels) {
+                if (label.innerText.trim() === labelText) {
+                    const htmlFor = label.getAttribute('for');
+                    targetInput = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=&quot;stNumberInput&quot;]').querySelector('input[type=&quot;number&quot;]');
+                    break;
+                }
+            }
+            
+            if (targetInput) {
+                // 강제 쓰기 허용
+                targetInput.readOnly = false;
+                targetInput.style.pointerEvents = 'auto';
+                targetInput.focus();
+                
+                const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
+                const prototype = Object.getPrototypeOf(targetInput);
+                const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                const setter = valueSetter || prototypeValueSetter;
+                
+                if (setter) {
+                    setter.call(targetInput, val);
+                } else {
+                    targetInput.value = val;
+                }
+                
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                setTimeout(() => {
+                    const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                    const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                    targetInput.dispatchEvent(keyDown);
+                    targetInput.dispatchEvent(keyUp);
+                    
+                    setTimeout(() => {
+                        targetInput.blur();
+                        targetInput.readOnly = true;
+                        targetInput.style.pointerEvents = 'none';
+                    }, 50);
+                }, 50);
+            }
+        }
+        
+        // 클립보드 복사 요청 처리
+        if (data.type === 'COPY_CLIPBOARD') {
+            const text = data.text;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(err => {
+                    console.error('Clipboard copy fail:', err);
+                });
+            } else {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+        }
+    });
+}
+" style="display:none;">
+"""
+st.markdown(inject_js, unsafe_allow_html=True)
+
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🔤 단어 파일 처리", 
     "📚 리딩-해석추가", 
@@ -1548,137 +1655,42 @@ with tab9:
             }}
         }});
 
-        function lockInputs() {{
-            try {{
-                const parentDocs = window.parent.document;
-                const labels = parentDocs.querySelectorAll('label');
-                for (let label of labels) {{
-                    const text = label.innerText.trim();
-                    if (text === '시작(초) #{idx+1}' || text === '종료(초) #{idx+1}') {{
-                        const htmlFor = label.getAttribute('for');
-                        const input = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
-                        if (input) {{
-                            input.readOnly = true;
-                            input.style.pointerEvents = 'none';
-                            input.style.backgroundColor = '#161a24';
-                            input.style.color = '#a3a8b4';
-                        }}
-                    }}
-                }}
-            }} catch(e) {{}}
-        }}
-
-        // 인풋창 감시 및 락 주기적 실행
-        setTimeout(lockInputs, 200);
-        setInterval(lockInputs, 1000);
-
         function updateInputs(startVal, endVal) {{
             try {{
-                const parentDocs = window.parent.document;
-                const labels = parentDocs.querySelectorAll('label');
-                
-                let startInput = null;
-                let endInput = null;
-                
-                for (let label of labels) {{
-                    const text = label.innerText.trim();
-                    if (text === '시작(초) #{idx+1}') {{
-                        const htmlFor = label.getAttribute('for');
-                        startInput = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
-                    }}
-                    if (text === '종료(초) #{idx+1}') {{
-                        const htmlFor = label.getAttribute('for');
-                        endInput = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
-                    }}
+                // 부모 창으로 입력 필드 업데이트 요청 전달 (CORS 우회)
+                if (startVal !== null) {{
+                    window.parent.postMessage({{
+                        type: 'SET_INPUT_VALUE',
+                        label: '시작(초) #{idx+1}',
+                        value: startVal
+                    }}, '*');
                 }}
                 
-                function forceUpdate(input, val, callback) {{
-                    if (!input || val === null) {{
-                        if (callback) callback();
-                        return;
+                // 시작값과 종료값 동시 업데이트 충돌 방지를 위해 200ms 후 전송
+                setTimeout(() => {{
+                    if (endVal !== null) {{
+                        window.parent.postMessage({{
+                            type: 'SET_INPUT_VALUE',
+                            label: '종료(초) #{idx+1}',
+                            value: endVal
+                        }}, '*');
                     }}
-                    
-                    // 락 임시 해제
-                    input.readOnly = false;
-                    input.style.pointerEvents = 'auto';
-                    input.focus();
-                    
-                    // 값 변경 (React 내부 value setter 우회 지원)
-                    const valueSetter = Object.getOwnPropertyDescriptor(input, 'value')?.set;
-                    const prototype = Object.getPrototypeOf(input);
-                    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-                    const setter = valueSetter || prototypeValueSetter;
-                    
-                    if (setter) {{
-                        setter.call(input, val);
-                    }} else {{
-                        input.value = val;
-                    }}
-                    
-                    // 이벤트 디스패치
-                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    
-                    // React가 변경된 상태를 감지하고 동기화할 수 있도록 충분한 비동기 딜레이를 둠
-                    setTimeout(() => {{
-                        const keyDown = new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }});
-                        const keyUp = new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }});
-                        input.dispatchEvent(keyDown);
-                        input.dispatchEvent(keyUp);
-                        
-                        setTimeout(() => {{
-                            input.blur();
-                            input.readOnly = true;
-                            input.style.pointerEvents = 'none';
-                            if (callback) callback();
-                        }}, 100);
-                    }}, 100);
-                }}
-
-                // 두 input이 순차적으로(WebSocket 충돌 없이) 업데이트되도록 체이닝
-                if (startInput && startVal !== null) {{
-                    forceUpdate(startInput, startVal, () => {{
-                        setTimeout(() => {{
-                            if (endInput && endVal !== null) {{
-                                forceUpdate(endInput, endVal, null);
-                            }}
-                        }}, 200);
-                    }});
-                }} else if (endInput && endVal !== null) {{
-                    forceUpdate(endInput, endVal, null);
-                }}
-                
+                }}, 200);
             }} catch (e) {{
-                alert('인풋 업데이트 오류: ' + e.message);
+                alert('인풋 업데이트 요청 실패: ' + e.message);
             }}
         }}
 
         document.getElementById('setBtn_{idx}').addEventListener('click', () => {{
-            try {{
-                // 1. 먼저 부모 전역 변수 조회 시도 (CORS 허용 상태인 경우)
-                let start = window.parent.globalRegionStart;
-                let end = window.parent.globalRegionEnd;
-                
-                // 2. 만약 전역 변수가 비었거나 차단된 경우, postMessage로 받은 로컬 최신값 사용
-                if (start === undefined || end === undefined) {{
-                    start = latestStart;
-                    end = latestEnd;
-                }}
-                
-                if (!start || !end) {{
-                    alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
-                    return;
-                }}
-                
-                updateInputs(start, end);
-            }} catch (e) {{
-                // 전역 객체 접근 거부 시 로컬 데이터로 대체
-                if (latestStart && latestEnd) {{
-                    updateInputs(latestStart, latestEnd);
-                }} else {{
-                    alert('SET 오류: ' + e.message);
-                }}
+            const start = latestStart;
+            const end = latestEnd;
+            
+            if (!start || !end) {{
+                alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
+                return;
             }}
+            
+            updateInputs(start, end);
         }});
 
         document.getElementById('pasteBtn_{idx}').addEventListener('click', () => {{
@@ -2082,13 +2094,14 @@ with tab9:
                 }}
                 
                 function copyText(text, type) {{
-                    if (navigator.clipboard && navigator.clipboard.writeText) {{
-                        navigator.clipboard.writeText(text).then(() => {{
-                            showToast(`${{type}} 복사 완료: ${{text}}`);
-                        }}).catch(() => {{
-                            fallbackCopy(text, type);
-                        }});
-                    }} else {{
+                    try {{
+                        window.parent.postMessage({{
+                            type: 'COPY_CLIPBOARD',
+                            text: text
+                        }}, '*');
+                        showToast(`${{type}} 복사 완료: ${{text}}`);
+                    }} catch (e) {{
+                        console.error('CORS Bridge copy error:', e);
                         fallbackCopy(text, type);
                     }}
                 }}
