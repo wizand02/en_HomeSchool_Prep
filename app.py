@@ -825,6 +825,40 @@ encoded_js = base64.b64encode(parent_js_code.encode('utf-8')).decode('utf-8')
 inject_js = f'<img src="x" onerror="if(!window.hasStreamlitListener){{window.hasStreamlitListener=true; eval(atob(\'{encoded_js}\'));}}" style="display:none;">'
 st.markdown(inject_js, unsafe_allow_html=True)
 
+# allow-same-origin 샌드박스를 이용한 부모 DOM 직접 접근 릴레이
+# inject_js(img onerror)가 CSP에 차단될 경우에도 인풋 잠금이 동작하도록 보완
+relay_html = """
+<script>
+(function() {
+    var p = window.parent;
+    if (p.__wfLockActive) return;
+    p.__wfLockActive = true;
+    p.setInterval(function() {
+        try {
+            var labels = p.document.querySelectorAll('label');
+            for (var i = 0; i < labels.length; i++) {
+                var t = labels[i].innerText.trim();
+                if (t.startsWith('시작(초) #') || t.startsWith('종료(초) #')) {
+                    var hf = labels[i].getAttribute('for');
+                    var pc = labels[i].closest('[data-testid="stNumberInput"]');
+                    var inp = hf ? p.document.getElementById(hf) :
+                        (pc ? pc.querySelector('input[type="number"]') : null);
+                    if (inp && !inp.readOnly && p.document.activeElement !== inp) {
+                        inp.readOnly = true;
+                        inp.style.pointerEvents = 'none';
+                        inp.style.backgroundColor = '#161a24';
+                        inp.style.color = '#a3a8b4';
+                    }
+                }
+            }
+        } catch(e) {}
+    }, 500);
+})();
+</script>
+"""
+st.components.v1.html(relay_html, height=1)
+
+
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🔤 단어 파일 처리", 
     "📚 리딩-해석추가", 
@@ -1666,21 +1700,24 @@ with tab9:
     def rendering_control_buttons(idx):
         html_code = f"""
         <style>
-            body {{
+            html, body {{
                 margin: 0;
                 padding: 0;
                 overflow: hidden;
                 background-color: transparent;
+                height: 100%;
             }}
             .btn-wrapper {{
                 display: flex;
                 gap: 6px;
                 margin-top: 28px;
                 height: 38px;
+                width: 100%;
+                box-sizing: border-box;
             }}
             .action-btn {{
                 flex: 1;
-                padding: 6px 4px;
+                padding: 0 4px;
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
@@ -1688,11 +1725,14 @@ with tab9:
                 font-weight: bold;
                 color: white;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                transition: all 0.2s ease;
+                transition: opacity 0.15s, box-shadow 0.15s;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 gap: 2px;
+                height: 100%;
+                box-sizing: border-box;
+                outline: none;
             }}
             .btn-set {{
                 background: linear-gradient(135deg, #00d2ff 0%, #00a2ff 100%);
@@ -1701,11 +1741,12 @@ with tab9:
                 background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             }}
             .action-btn:hover {{
-                opacity: 0.9;
-                transform: translateY(-1px);
+                opacity: 0.85;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
             }}
             .action-btn:active {{
-                transform: translateY(0);
+                opacity: 0.7;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
             }}
         </style>
         <div class="btn-wrapper">
@@ -1714,32 +1755,87 @@ with tab9:
         </div>
 
         <script>
-        function updateInputs(startVal, endVal) {{
+        // allow-same-origin 샌드박스: window.parent.document 직접 접근으로 Streamlit 인풋 제어
+        function setInputValue(labelText, val, callback) {{
             try {{
-                window.parent.postMessage({{
-                    type: 'SET_INPUT_VALUE_DIRECT',
-                    idx: {idx},
-                    start: startVal,
-                    end: endVal
-                }}, '*');
+                var doc = window.parent.document;
+                var labels = doc.querySelectorAll('label');
+                var targetInput = null;
+                for (var i = 0; i < labels.length; i++) {{
+                    if (labels[i].innerText.trim() === labelText) {{
+                        var hf = labels[i].getAttribute('for');
+                        var pc = labels[i].closest('[data-testid="stNumberInput"]');
+                        targetInput = hf ? doc.getElementById(hf) :
+                            (pc ? pc.querySelector('input[type="number"]') : null);
+                        break;
+                    }}
+                }}
+                if (targetInput) {{
+                    targetInput.readOnly = false;
+                    targetInput.style.pointerEvents = 'auto';
+                    targetInput.focus();
+                    var proto = Object.getPrototypeOf(targetInput);
+                    var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                    var setter = desc && desc.set;
+                    if (setter) setter.call(targetInput, val);
+                    else targetInput.value = val;
+                    targetInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    targetInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    setTimeout(function() {{
+                        targetInput.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', keyCode: 13, bubbles: true }}));
+                        targetInput.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', keyCode: 13, bubbles: true }}));
+                        setTimeout(function() {{
+                            targetInput.blur();
+                            targetInput.readOnly = true;
+                            targetInput.style.pointerEvents = 'none';
+                            if (callback) callback();
+                        }}, 50);
+                    }}, 50);
+                }} else {{
+                    if (callback) callback();
+                }}
             }} catch (e) {{
-                alert('인풋 업데이트 요청 실패: ' + e.message);
+                console.error('setInputValue error:', e);
+                if (callback) callback();
             }}
         }}
 
-        document.getElementById('setBtn_{idx}').addEventListener('click', () => {{
-            window.parent.postMessage({{
-                type: 'SET_INPUT_VALUE_FROM_LATEST',
-                idx: {idx}
-            }}, '*');
+        document.getElementById('setBtn_{idx}').addEventListener('click', function() {{
+            var start = localStorage.getItem('wf_region_start');
+            var end = localStorage.getItem('wf_region_end');
+            if (start === null || end === null) {{
+                alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
+                return;
+            }}
+            setInputValue('시작(초) #{idx+1}', start, function() {{
+                setTimeout(function() {{
+                    setInputValue('종료(초) #{idx+1}', end, null);
+                }}, 200);
+            }});
         }});
 
-        document.getElementById('pasteBtn_{idx}').addEventListener('click', () => {{
-            // 부모 창의 latestClipboard 저장값을 릴레이로 인풋에 반영 (CORS 안전)
-            window.parent.postMessage({{
-                type: 'PASTE_FROM_CLIPBOARD',
-                idx: {idx}
-            }}, '*');
+        document.getElementById('pasteBtn_{idx}').addEventListener('click', function() {{
+            var clip = localStorage.getItem('wf_clipboard');
+            if (!clip) {{
+                alert('먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
+                return;
+            }}
+            var parts = clip.split(',');
+            if (parts.length === 2) {{
+                var sv = parseFloat(parts[0].trim());
+                var ev = parseFloat(parts[1].trim());
+                if (!isNaN(sv) && !isNaN(ev)) {{
+                    setInputValue('시작(초) #{idx+1}', sv.toFixed(2), function() {{
+                        setTimeout(function() {{
+                            setInputValue('종료(초) #{idx+1}', ev.toFixed(2), null);
+                        }}, 200);
+                    }});
+                }} else {{
+                    alert('시간 형식이 올바르지 않습니다.');
+                }}
+            }} else {{
+                alert('붙여넣을 데이터 형식이 올바르지 않습니다.\n먼저 파형에서 "모두 복사"를 눌러주세요.');
+            }}
         }});
         </script>
         """
@@ -1854,11 +1950,11 @@ with tab9:
                     box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
                 }}
                 .btn:hover:not(:disabled) {{
-                    opacity: 0.9;
-                    transform: translateY(-1px);
+                    opacity: 0.85;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                 }}
                 .btn:active:not(:disabled) {{
-                    transform: translateY(0);
+                    opacity: 0.7;
                 }}
                 .btn:disabled {{
                     background: #001224;
@@ -2076,16 +2172,11 @@ with tab9:
                         regionTimeEl.innerHTML = `<span class="time-span">${{start}}s ~ ${{end}}s</span>`;
                     }}
                     
-                    // 부모 창(Streamlit 메인 페이지)으로 최신 영역 변경 사항 발송 (CORS 격리 우회용 핵심 중계)
+                    // localStorage에 영역 정보 저장 (SET 버튼 릴레이용)
                     try {{
-                        window.parent.postMessage({{
-                            type: 'WAVEFORM_REGION_UPDATE',
-                            start: start,
-                            end: end
-                        }}, '*');
-                    }} catch(e) {{
-                        console.error("Failed to post message to parent:", e);
-                    }}
+                        localStorage.setItem('wf_region_start', start);
+                        localStorage.setItem('wf_region_end', end);
+                    }} catch(e) {{ console.error('localStorage write failed:', e); }}
                     
                     const btnStart = document.getElementById('copyStartBtn');
                     const btnEnd = document.getElementById('copyEndBtn');
@@ -2096,21 +2187,23 @@ with tab9:
                         btnEnd.disabled = false;
                         btnBoth.disabled = false;
                         
-                        btnStart.onclick = () => copyText(start, '시작 시간');
-                        btnEnd.onclick = () => copyText(end, '종료 시간');
-                        btnBoth.onclick = () => copyText(start + ', ' + end, '시작 및 종료 시간');
+                        btnStart.onclick = () => copyText(start, '시작 시간', false);
+                        btnEnd.onclick = () => copyText(end, '종료 시간', false);
+                        btnBoth.onclick = () => copyText(start + ', ' + end, '시작 및 종료 시간', true);
                     }}
                 }}
                 
-                function copyText(text, type) {{
-                    try {{
-                        window.parent.postMessage({{
-                            type: 'COPY_CLIPBOARD',
-                            text: text
-                        }}, '*');
-                        showToast(`${{type}} 복사 완료: ${{text}}`);
-                    }} catch (e) {{
-                        console.error('CORS Bridge copy error:', e);
+                function copyText(text, type, storeForPaste) {{
+                    // PASTE 릴레이용 localStorage 저장 (모두 복사인 경우만)
+                    if (storeForPaste) {{
+                        try {{ localStorage.setItem('wf_clipboard', text); }} catch(e) {{}}
+                    }}
+                    // 시스템 클립보드 복사
+                    if (navigator.clipboard && navigator.clipboard.writeText) {{
+                        navigator.clipboard.writeText(text).then(() => {{
+                            showToast(`${{type}} 복사 완료: ${{text}}`);
+                        }}).catch(() => {{ fallbackCopy(text, type); }});
+                    }} else {{
                         fallbackCopy(text, type);
                     }}
                 }}
