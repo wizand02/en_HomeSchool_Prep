@@ -653,6 +653,10 @@ import base64
 parent_js_code = """
 console.log('Streamlit CORS Bridge Script Running (Base64 version)');
 
+// 최신 영역 정보를 부모 전역에 보관 (CORS 격리 우회용)
+window.latestStart = null;
+window.latestEnd = null;
+
 // 1. 인풋창 락 주기적 감시 및 처리 (부모 창 컨텍스트이므로 보안 에러 없음)
 function lockInputs() {
     try {
@@ -675,63 +679,100 @@ function lockInputs() {
 }
 setInterval(lockInputs, 500);
 
+// 공통 인풋 갱신 유틸리티 함수 (동기/비동기 흐름 제어)
+function setInputValue(labelText, val, callback) {
+    const labels = document.querySelectorAll('label');
+    let targetInput = null;
+    for (let label of labels) {
+        if (label.innerText.trim() === labelText) {
+            const htmlFor = label.getAttribute('for');
+            const parentContainer = label.closest('[data-testid="stNumberInput"]');
+            targetInput = htmlFor ? document.getElementById(htmlFor) : (parentContainer ? parentContainer.querySelector('input[type="number"]') : null);
+            break;
+        }
+    }
+    
+    if (targetInput) {
+        targetInput.readOnly = false;
+        targetInput.style.pointerEvents = 'auto';
+        targetInput.focus();
+        
+        const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
+        const prototype = Object.getPrototypeOf(targetInput);
+        const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        const setter = valueSetter || prototypeValueSetter;
+        
+        if (setter) {
+            setter.call(targetInput, val);
+        } else {
+            targetInput.value = val;
+        }
+        
+        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        setTimeout(() => {
+            const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+            const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+            targetInput.dispatchEvent(keyDown);
+            targetInput.dispatchEvent(keyUp);
+            
+            setTimeout(() => {
+                targetInput.blur();
+                targetInput.readOnly = true;
+                targetInput.style.pointerEvents = 'none';
+                if (callback) callback();
+            }, 50);
+        }, 50);
+    } else {
+        if (callback) callback();
+    }
+}
+
 // 2. 메시지 수신 리스너 등록
 window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data) return;
     
-    // 인풋 값 설정 요청 처리
-    if (data.type === 'SET_INPUT_VALUE') {
-        const labelText = data.label;
-        const val = data.value;
-        
-        const labels = document.querySelectorAll('label');
-        let targetInput = null;
-        for (let label of labels) {
-            if (label.innerText.trim() === labelText) {
-                const htmlFor = label.getAttribute('for');
-                const parentContainer = label.closest('[data-testid="stNumberInput"]');
-                targetInput = htmlFor ? document.getElementById(htmlFor) : (parentContainer ? parentContainer.querySelector('input[type="number"]') : null);
-                break;
-            }
-        }
-        
-        if (targetInput) {
-            // 강제 쓰기 허용
-            targetInput.readOnly = false;
-            targetInput.style.pointerEvents = 'auto';
-            targetInput.focus();
-            
-            const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
-            const prototype = Object.getPrototypeOf(targetInput);
-            const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-            const setter = valueSetter || prototypeValueSetter;
-            
-            if (setter) {
-                setter.call(targetInput, val);
-            } else {
-                targetInput.value = val;
-            }
-            
-            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-            targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            setTimeout(() => {
-                const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-                const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-                targetInput.dispatchEvent(keyDown);
-                targetInput.dispatchEvent(keyUp);
-                
-                setTimeout(() => {
-                    targetInput.blur();
-                    targetInput.readOnly = true;
-                    targetInput.style.pointerEvents = 'none';
-                }, 50);
-            }, 50);
-        }
+    // 2-A. Wavesurfer 영역 변경 사항 수신 및 캐싱
+    if (data.type === 'WAVEFORM_REGION_UPDATE') {
+        window.latestStart = data.start;
+        window.latestEnd = data.end;
     }
     
-    // 클립보드 복사 요청 처리
+    // 2-B. SET 버튼 클릭 시 최신 영역 정보를 인풋에 세팅 요청 처리
+    if (data.type === 'SET_INPUT_VALUE_FROM_LATEST') {
+        const idx = data.idx;
+        const startVal = window.latestStart;
+        const endVal = window.latestEnd;
+        
+        if (!startVal || !endVal) {
+            alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
+            return;
+        }
+        
+        // 순차 비동기 갱신
+        setInputValue('시작(초) #' + (idx + 1), startVal, () => {
+            setTimeout(() => {
+                setInputValue('종료(초) #' + (idx + 1), endVal, null);
+            }, 200);
+        });
+    }
+
+    // 2-C. PASTE 버튼 클릭 시 지정 값을 인풋에 세팅 요청 처리
+    if (data.type === 'SET_INPUT_VALUE_DIRECT') {
+        const idx = data.idx;
+        const startVal = data.start;
+        const endVal = data.end;
+        
+        setInputValue('시작(초) #' + (idx + 1), startVal, () => {
+            setTimeout(() => {
+                setInputValue('종료(초) #' + (idx + 1), endVal, null);
+            }, 200);
+        });
+    }
+    
+    // 2-D. 클립보드 복사 요청 처리
     if (data.type === 'COPY_CLIPBOARD') {
         const text = data.text;
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2054,30 +2095,15 @@ with tab9:
                         regionTimeEl.innerHTML = `<span class="time-span">${{start}}s ~ ${{end}}s</span>`;
                     }}
                     
-                    // 1. 부모 창 전역 객체 저장 (CORS가 허용될 때 작동하는 fallback)
+                    // 부모 창(Streamlit 메인 페이지)으로 최신 영역 변경 사항 발송 (CORS 격리 우회용 핵심 중계)
                     try {{
-                        window.parent.globalRegionStart = start;
-                        window.parent.globalRegionEnd = end;
+                        window.parent.postMessage({{
+                            type: 'WAVEFORM_REGION_UPDATE',
+                            start: start,
+                            end: end
+                        }}, '*');
                     }} catch(e) {{
-                        console.warn("Direct window.parent access blocked:", e);
-                    }}
-                    
-                    // 2. 다른 모든 자식 iframe들에게 직접 postMessage 전송 (CORS 격리 우회용 핵심 채널)
-                    try {{
-                        const frames = window.parent.frames;
-                        for (let i = 0; i < frames.length; i++) {{
-                            try {{
-                                frames[i].postMessage({{
-                                    type: 'WAVEFORM_REGION_UPDATE',
-                                    start: start,
-                                    end: end
-                                }}, '*');
-                            }} catch(fe) {{
-                                // cross-origin 등으로 접근 불가능한 프레임은 건너뜀
-                            }}
-                        }}
-                    }} catch(e) {{
-                        console.error("Frame loop postMessage failed:", e);
+                        console.error("Failed to post message to parent:", e);
                     }}
                     
                     const btnStart = document.getElementById('copyStartBtn');
@@ -2091,7 +2117,7 @@ with tab9:
                         
                         btnStart.onclick = () => copyText(start, '시작 시간');
                         btnEnd.onclick = () => copyText(end, '종료 시간');
-                        btnBoth.onclick = () => copyText(`${{start}}, ${{end}}`, '시작 및 종료 시간');
+                        btnBoth.onclick = () => copyText(start + ', ' + end, '시작 및 종료 시간');
                     }}
                 }}
                 
