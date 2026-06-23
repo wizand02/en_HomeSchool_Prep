@@ -223,7 +223,7 @@ def process_reading_excel(sheets_dict):
 
 
 def translate_polite(translator, text):
-    """구글 번역 시 존댓말(높임말)로 유도하고, 번역 후 간단히 평서문 어미를 높임말로 교정"""
+    """정확한 번역을 위해 다른 조작 없이 원본 텍스트를 그대로 번역"""
     text_str = str(text).strip()
     if not text_str:
         return ""
@@ -231,53 +231,10 @@ def translate_polite(translator, text):
     if text_str.endswith(':'):
         return text_str
         
-    # 문장 기호 추출 및 본문 분리
-    punc = ""
-    if text_str[-1] in ['.', '!', '?']:
-        punc = text_str[-1]
-        raw_body = text_str[:-1].strip()
-    else:
-        raw_body = text_str
-    
-    # "Please, " 접두사를 붙여 존댓말 뉘앙스 유도
-    polite_text = f"Please, {raw_body}{punc}"
-    
     try:
-        translated = translator.translate(polite_text)
-        
-        # 불필요한 번역 잔재 제거
-        translated = re.sub(r"^(제발|부디|부탁합니다|부탁드립니다|바랍니다)[,\s]*", "", translated)
-        translated = re.sub(r"[,\s]*(제발|부디|부탁합니다|부탁드립니다|바랍니다)$", "", translated)
-        
-        # 대표적인 평서문 반말 어미 치환 교정
-        replacements = {
-            r"했다\.": "했습니다.",
-            r"한다\.": "합니다.",
-            r"이다\.": "입니다.",
-            r"된다\.": "됩니다.",
-            r"않는다\.": "않습니다.",
-            r"없다\.": "없습니다.",
-            r"있다\.": "있습니다.",
-            r"오다\.": "옵니다.",
-            r"가다\.": "갑니다.",
-            r"먹다\.": "먹습니다.",
-            r"보다\.": "봅니다.",
-            r"알다\.": "압니다.",
-            r"모르다\.": "모릅니다.",
-            r"좋다\.": "좋습니다.",
-            r"싫다\.": "싫습니다.",
-            r"같다\.": "같습니다.",
-            r"아니다\.": "아닙니다.",
-        }
-        for pattern, repl in replacements.items():
-            translated = re.sub(pattern, repl, translated)
-        
-        return translated.strip()
-    except Exception as e:
-        try:
-            return translator.translate(text_str)
-        except:
-            return ""
+        return translator.translate(text_str)
+    except:
+        return ""
 
 
 def process_listening_excel(sheets_dict):
