@@ -259,15 +259,29 @@ def process_listening_excel(sheets_dict):
             if val_d:
                 existing_e = df.iat[index, 4]
                 if pd.isna(existing_e) or str(existing_e).strip() == "":
-                    # "Sally:" 와 같이 콜론으로 끝나는 텍스트는 화자를 의미하므로 그대로 복사
-                    if val_d.endswith(':'):
-                        df.iat[index, 4] = val_d
+                    # "Anne: Hello" 혹은 "Sally:" 와 같이 화자가 처음에 오고 콜론이 붙은 경우 처리
+                    match = re.match(r"^([A-Za-z0-9\s\-]+:)\s*(.*)", val_d)
+                    if match:
+                        speaker = match.group(1).strip()
+                        body = match.group(2).strip()
+                        if body:
+                            try:
+                                translated_body = translate_polite(translator, body)
+                                df.iat[index, 4] = f"{speaker} {translated_body}"
+                            except Exception as e:
+                                st.warning(f"본문 번역 오류 (행 {index+2}): {e}")
+                        else:
+                            # 콜론으로만 끝나는 화자명인 경우 그대로 복사
+                            df.iat[index, 4] = val_d
                     else:
                         try:
-                            # 높임말 번역 호출
+                            # 일반 문장 번역
                             df.iat[index, 4] = translate_polite(translator, val_d)
                         except Exception as e:
                             st.warning(f"본문 번역 오류 (행 {index+2}): {e}")
+            else:
+                # D 열이 비었을 때는 E 열도 공백으로 둔다.
+                df.iat[index, 4] = ""
             progress_bar.progress((index + 1) / len(df))
         st.success("'본문' 시트 처리 완료")
 
