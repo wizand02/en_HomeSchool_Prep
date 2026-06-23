@@ -185,7 +185,7 @@ def process_reading_excel(sheets_dict):
             df[f"Column_{len(df.columns)}"] = ""
         
         # E열 데이터타입을 object로 변환하여 float64 에러 방지
-        df.iloc[:, 4] = df.iloc[:, 4].astype(object)
+        df[df.columns[4]] = df[df.columns[4]].astype(object)
         
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
@@ -209,7 +209,7 @@ def process_reading_excel(sheets_dict):
             df[f"Column_{len(df.columns)}"] = ""
             
         # D열 데이터타입을 object로 변환하여 float64 에러 방지
-        df.iloc[:, 3] = df.iloc[:, 3].astype(object)
+        df[df.columns[3]] = df[df.columns[3]].astype(object)
         
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
@@ -260,7 +260,7 @@ def process_listening_excel(sheets_dict):
             df[f"Column_{len(df.columns)}"] = ""
         
         # E열 데이터타입을 object로 변환하여 float64 에러 방지
-        df.iloc[:, 4] = df.iloc[:, 4].astype(object)
+        df[df.columns[4]] = df[df.columns[4]].astype(object)
         
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
@@ -302,7 +302,7 @@ def process_listening_excel(sheets_dict):
             df[f"Column_{len(df.columns)}"] = ""
             
         # D열 데이터타입을 object로 변환하여 float64 에러 방지
-        df.iloc[:, 3] = df.iloc[:, 3].astype(object)
+        df[df.columns[3]] = df[df.columns[3]].astype(object)
         
         progress_bar = st.progress(0)
         for index, row in df.iterrows():
