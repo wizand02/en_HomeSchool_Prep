@@ -746,7 +746,7 @@ window.addEventListener('message', (event) => {
         const startVal = window.latestStart;
         const endVal = window.latestEnd;
         
-        if (!startVal || !endVal) {
+        if (startVal === null || startVal === undefined || startVal === "" || endVal === null || endVal === undefined || endVal === "") {
             alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
             return;
         }
@@ -1686,54 +1686,24 @@ with tab9:
         </div>
 
         <script>
-        let latestStart = null;
-        let latestEnd = null;
-
-        // Wavesurfer가 브로드캐스트하는 postMessage를 구독하여 로컬 변수에 누적 보관
-        window.addEventListener('message', (event) => {{
-            const data = event.data;
-            if (data && data.type === 'WAVEFORM_REGION_UPDATE') {{
-                latestStart = data.start;
-                latestEnd = data.end;
-            }}
-        }});
-
         function updateInputs(startVal, endVal) {{
             try {{
-                // 부모 창으로 입력 필드 업데이트 요청 전달 (CORS 우회)
-                if (startVal !== null) {{
-                    window.parent.postMessage({{
-                        type: 'SET_INPUT_VALUE',
-                        label: '시작(초) #{idx+1}',
-                        value: startVal
-                    }}, '*');
-                }}
-                
-                // 시작값과 종료값 동시 업데이트 충돌 방지를 위해 200ms 후 전송
-                setTimeout(() => {{
-                    if (endVal !== null) {{
-                        window.parent.postMessage({{
-                            type: 'SET_INPUT_VALUE',
-                            label: '종료(초) #{idx+1}',
-                            value: endVal
-                        }}, '*');
-                    }}
-                }}, 200);
+                window.parent.postMessage({{
+                    type: 'SET_INPUT_VALUE_DIRECT',
+                    idx: {idx},
+                    start: startVal,
+                    end: endVal
+                }}, '*');
             }} catch (e) {{
                 alert('인풋 업데이트 요청 실패: ' + e.message);
             }}
         }}
 
         document.getElementById('setBtn_{idx}').addEventListener('click', () => {{
-            const start = latestStart;
-            const end = latestEnd;
-            
-            if (!start || !end) {{
-                alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
-                return;
-            }}
-            
-            updateInputs(start, end);
+            window.parent.postMessage({{
+                type: 'SET_INPUT_VALUE_FROM_LATEST',
+                idx: {idx}
+            }}, '*');
         }});
 
         document.getElementById('pasteBtn_{idx}').addEventListener('click', () => {{
@@ -2019,6 +1989,14 @@ with tab9:
                             resize: true
                         }});
                         updateUI(activeRegion);
+                        
+                        // 부모 리스너의 초기화 지연을 감안하여 500ms, 1500ms 후에 최신 영역값을 안전하게 재전송
+                        setTimeout(() => {{
+                            if (activeRegion) updateUI(activeRegion);
+                        }}, 500);
+                        setTimeout(() => {{
+                            if (activeRegion) updateUI(activeRegion);
+                        }}, 1500);
                         
                         // 드래그 선택 기능도 활성화 (영역을 다 지우고 새로 그릴 때 대비)
                         wsRegions.enableDragSelection({{
