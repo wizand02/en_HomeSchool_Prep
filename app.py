@@ -25,14 +25,19 @@ def get_update_filename(original_name: str) -> str:
     return p.stem + "_update" + p.suffix
 
 
-def create_zip_of_directory(directory_path):
-    """지정된 디렉토리 하위의 모든 mp3 파일을 ZIP 바이너리로 압축"""
+def create_zip_of_directory(directory_path, sub_directory=None):
+    """지정된 디렉토리(directory_path) 혹은 그 하위의 특정 서브디렉토리(sub_directory) 내의 모든 mp3 파일을 ZIP 바이너리로 압축"""
     if not os.path.exists(directory_path):
         return None
+    
+    search_path = os.path.join(directory_path, sub_directory) if sub_directory else directory_path
+    if not os.path.exists(search_path):
+        return None
+
     zip_buffer = io.BytesIO()
     has_files = False
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for root, dirs, files in os.walk(directory_path):
+        for root, dirs, files in os.walk(search_path):
             for file in files:
                 if file.endswith('.mp3'):
                     file_path = os.path.join(root, file)
@@ -1476,12 +1481,248 @@ with tab8:
                             )
                     except Exception as e:
                         st.error(f"오류 발생: {e}")
-
-
 # ==========================================
 # TAB 9: 리스닝 사운드 편집 (Audio Slicing)
 # ==========================================
 with tab9:
+    def rendering_control_buttons(idx):
+        html_code = f"""
+        <style>
+            body {{
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background-color: transparent;
+            }}
+            .btn-wrapper {{
+                display: flex;
+                gap: 6px;
+                margin-top: 28px;
+                height: 38px;
+            }}
+            .action-btn {{
+                flex: 1;
+                padding: 6px 4px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: bold;
+                color: white;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 2px;
+            }}
+            .btn-set {{
+                background: linear-gradient(135deg, #00d2ff 0%, #00a2ff 100%);
+            }}
+            .btn-paste {{
+                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            }}
+            .action-btn:hover {{
+                opacity: 0.9;
+                transform: translateY(-1px);
+            }}
+            .action-btn:active {{
+                transform: translateY(0);
+            }}
+        </style>
+        <div class="btn-wrapper">
+            <button id="setBtn_{idx}" class="action-btn btn-set">⚙️ SET</button>
+            <button id="pasteBtn_{idx}" class="action-btn btn-paste">📋 PASTE</button>
+        </div>
+
+        <script>
+        let latestStart = null;
+        let latestEnd = null;
+
+        // Wavesurfer가 브로드캐스트하는 postMessage를 구독하여 로컬 변수에 누적 보관
+        window.addEventListener('message', (event) => {{
+            const data = event.data;
+            if (data && data.type === 'WAVEFORM_REGION_UPDATE') {{
+                latestStart = data.start;
+                latestEnd = data.end;
+            }}
+        }});
+
+        function lockInputs() {{
+            try {{
+                const parentDocs = window.parent.document;
+                const labels = parentDocs.querySelectorAll('label');
+                for (let label of labels) {{
+                    const text = label.innerText.trim();
+                    if (text === '시작(초) #{idx+1}' || text === '종료(초) #{idx+1}') {{
+                        const htmlFor = label.getAttribute('for');
+                        const input = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
+                        if (input) {{
+                            input.readOnly = true;
+                            input.style.pointerEvents = 'none';
+                            input.style.backgroundColor = '#161a24';
+                            input.style.color = '#a3a8b4';
+                        }}
+                    }}
+                }}
+            }} catch(e) {{}}
+        }}
+
+        // 인풋창 감시 및 락 주기적 실행
+        setTimeout(lockInputs, 200);
+        setInterval(lockInputs, 1000);
+
+        function updateInputs(startVal, endVal) {{
+            try {{
+                const parentDocs = window.parent.document;
+                const labels = parentDocs.querySelectorAll('label');
+                
+                let startInput = null;
+                let endInput = null;
+                
+                for (let label of labels) {{
+                    const text = label.innerText.trim();
+                    if (text === '시작(초) #{idx+1}') {{
+                        const htmlFor = label.getAttribute('for');
+                        startInput = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
+                    }}
+                    if (text === '종료(초) #{idx+1}') {{
+                        const htmlFor = label.getAttribute('for');
+                        endInput = htmlFor ? parentDocs.getElementById(htmlFor) : label.closest('[data-testid="stNumberInput"]').querySelector('input[type="number"]');
+                    }}
+                }}
+                
+                function forceUpdate(input, val, callback) {{
+                    if (!input || val === null) {{
+                        if (callback) callback();
+                        return;
+                    }}
+                    
+                    // 락 임시 해제
+                    input.readOnly = false;
+                    input.style.pointerEvents = 'auto';
+                    input.focus();
+                    
+                    // 값 변경 (React 내부 value setter 우회 지원)
+                    const valueSetter = Object.getOwnPropertyDescriptor(input, 'value')?.set;
+                    const prototype = Object.getPrototypeOf(input);
+                    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                    const setter = valueSetter || prototypeValueSetter;
+                    
+                    if (setter) {{
+                        setter.call(input, val);
+                    }} else {{
+                        input.value = val;
+                    }}
+                    
+                    // 이벤트 디스패치
+                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    
+                    // React가 변경된 상태를 감지하고 동기화할 수 있도록 충분한 비동기 딜레이를 둠
+                    setTimeout(() => {{
+                        const keyDown = new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }});
+                        const keyUp = new KeyboardEvent('keyup', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }});
+                        input.dispatchEvent(keyDown);
+                        input.dispatchEvent(keyUp);
+                        
+                        setTimeout(() => {{
+                            input.blur();
+                            input.readOnly = true;
+                            input.style.pointerEvents = 'none';
+                            if (callback) callback();
+                        }}, 100);
+                    }}, 100);
+                }}
+
+                // 두 input이 순차적으로(WebSocket 충돌 없이) 업데이트되도록 체이닝
+                if (startInput && startVal !== null) {{
+                    forceUpdate(startInput, startVal, () => {{
+                        setTimeout(() => {{
+                            if (endInput && endVal !== null) {{
+                                forceUpdate(endInput, endVal, null);
+                            }}
+                        }}, 200);
+                    }});
+                }} else if (endInput && endVal !== null) {{
+                    forceUpdate(endInput, endVal, null);
+                }}
+                
+            }} catch (e) {{
+                alert('인풋 업데이트 오류: ' + e.message);
+            }}
+        }}
+
+        document.getElementById('setBtn_{idx}').addEventListener('click', () => {{
+            try {{
+                // 1. 먼저 부모 전역 변수 조회 시도 (CORS 허용 상태인 경우)
+                let start = window.parent.globalRegionStart;
+                let end = window.parent.globalRegionEnd;
+                
+                // 2. 만약 전역 변수가 비었거나 차단된 경우, postMessage로 받은 로컬 최신값 사용
+                if (start === undefined || end === undefined) {{
+                    start = latestStart;
+                    end = latestEnd;
+                }}
+                
+                if (!start || !end) {{
+                    alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
+                    return;
+                }}
+                
+                updateInputs(start, end);
+            }} catch (e) {{
+                // 전역 객체 접근 거부 시 로컬 데이터로 대체
+                if (latestStart && latestEnd) {{
+                    updateInputs(latestStart, latestEnd);
+                }} else {{
+                    alert('SET 오류: ' + e.message);
+                }}
+            }}
+        }});
+
+        document.getElementById('pasteBtn_{idx}').addEventListener('click', () => {{
+            try {{
+                if (!navigator.clipboard || !navigator.clipboard.readText) {{
+                    const clipText = prompt('클립보드 내용을 여기에 붙여넣어주세요 (형식: 시작, 종료):');
+                    if (clipText) {{
+                        processText(clipText);
+                    }}
+                    return;
+                }}
+                
+                navigator.clipboard.readText().then(clipText => {{
+                    processText(clipText);
+                }}).catch(err => {{
+                    const clipText = prompt('클립보드 읽기 권한이 거부되었습니다. 복사한 값을 직접 붙여넣어주세요:', '');
+                    if (clipText) {{
+                        processText(clipText);
+                    }}
+                }});
+            }} catch (e) {{
+                alert('PASTE 오류: ' + e.message);
+            }}
+        }});
+
+        function processText(clipText) {{
+            if (!clipText) return;
+            const parts = clipText.split(',');
+            if (parts.length === 2) {{
+                const start = parseFloat(parts[0].trim());
+                const end = parseFloat(parts[1].trim());
+                if (!isNaN(start) && !isNaN(end)) {{
+                    updateInputs(start.toFixed(2), end.toFixed(2));
+                }} else {{
+                    alert('시간 형식이 올바르지 않습니다.');
+                }}
+            }} else {{
+                alert('복사된 데이터 형식이 올바르지 않습니다. (예: 1.25, 4.80)');
+            }}
+        }}
+        </script>
+        """
+        st.components.v1.html(html_code, height=72, scrolling=False)
+
     st.markdown("""
     엑셀 파일과 통 오디오 파일(.mp3)을 업로드하여 각 문장별로 사운드를 끊어냅니다.  
     - 재생하면서 문장의 **시작 시간**과 **종료 시간**을 입력하세요.
@@ -1519,9 +1760,370 @@ with tab9:
                 
             st.success(f"🎵 원본 오디오가 로드되었습니다. (총 길이: {duration_sec:.2f}초)")
             
-            # 원본 오디오 재생용 플레이어 
-            st.write("### 🎧 원본 오디오 전체 재생")
-            st.audio(audio_bytes, format="audio/mp3")
+            # ── 파형 시각화 및 편집 도구 ────────────────
+            st.write("### 📊 사운드 진동 파형 (시작/종료점 영역 설정)")
+            st.markdown("파형 양 끝의 **하늘색 막대바**를 드래그하여 조절하거나 파형 위를 **드래그**하여 영역(Region)을 설정하세요. 설정한 구간은 자동으로 **반복 재생**됩니다.")
+            
+            import base64
+            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+            
+            waveform_html = f"""
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 10px;
+                    background-color: #0e1117;
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    color: #fafafa;
+                }}
+                .wave-container {{
+                    background: #00162b;
+                    border: 1px solid #002d54;
+                    border-radius: 8px;
+                    padding: 15px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+                }}
+                #waveform {{
+                    background: #000f1f;
+                    border-radius: 6px;
+                    padding: 5px;
+                    border: 1px solid #002447;
+                }}
+                .control-bar {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 15px;
+                    margin-top: 15px;
+                    padding-top: 15px;
+                    border-top: 1px solid #002d54;
+                }}
+                .btn-group {{
+                    display: flex;
+                    gap: 8px;
+                }}
+                .btn {{
+                    padding: 8px 16px;
+                    border: none;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-size: 13px;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    transition: all 0.2s ease;
+                }}
+                .btn-primary {{
+                    background: linear-gradient(135deg, #ff4b4b 0%, #ff7575 100%);
+                    color: white;
+                }}
+                .btn-secondary {{
+                    background: #002447;
+                    color: #fafafa;
+                    border: 1px solid #003b73;
+                }}
+                .btn:hover:not(:disabled) {{
+                    opacity: 0.9;
+                    transform: translateY(-1px);
+                }}
+                .btn:active:not(:disabled) {{
+                    transform: translateY(0);
+                }}
+                .btn:disabled {{
+                    background: #001224;
+                    color: #475569;
+                    border: 1px solid #001c38;
+                    cursor: not-allowed;
+                }}
+                .info-display {{
+                    font-size: 14px;
+                    color: #94a3b8;
+                    background: #001c38;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                    border: 1px solid #002d54;
+                    min-width: 150px;
+                    text-align: center;
+                }}
+                .time-span {{
+                    font-weight: bold;
+                    color: #00ffd2;
+                }}
+                .slider-container {{
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    color: #94a3b8;
+                    font-size: 13px;
+                }}
+                .slider-container input[type="range"] {{
+                    accent-color: #00d2ff;
+                    cursor: pointer;
+                }}
+                /* Toast 알림 */
+                .toast {{
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: #10b981;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    font-weight: bold;
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                    z-index: 9999;
+                }}
+                .toast.show {{
+                    opacity: 1;
+                }}
+                
+                /* Wavesurfer Region 및 Handle Custom Styling */
+                .wavesurfer-region {{
+                    border: 1px dashed rgba(0, 210, 255, 0.4) !important;
+                    background-color: rgba(0, 150, 255, 0.15) !important;
+                }}
+                .wavesurfer-handle {{
+                    width: 6px !important;
+                    background-color: #00d2ff !important;
+                    opacity: 1 !important;
+                    cursor: col-resize;
+                    transition: background-color 0.2s;
+                }}
+                .wavesurfer-handle:hover {{
+                    background-color: #00ffd2 !important;
+                }}
+            </style>
+            
+            <div class="wave-container">
+                <div id="waveform"></div>
+                
+                <div class="control-bar">
+                    <div class="btn-group">
+                        <button id="playBtn" class="btn btn-primary"><i class="fa-solid fa-play"></i> 재생 / 일시정지</button>
+                    </div>
+                    
+                    <div class="slider-container">
+                        <i class="fa-solid fa-magnifying-glass-minus"></i>
+                        <input type="range" id="zoomSlider" min="10" max="300" value="10" style="width: 120px;">
+                        <i class="fa-solid fa-magnifying-glass-plus"></i>
+                    </div>
+
+                    <div class="info-display">
+                        선택 구간: <span id="region-time" class="time-span">없음 (드래그하세요)</span>
+                    </div>
+
+                    <div class="btn-group">
+                        <button id="copyStartBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 시작 복사</button>
+                        <button id="copyEndBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 종료 복사</button>
+                        <button id="copyBothBtn" class="btn btn-secondary" disabled><i class="fa-solid fa-copy"></i> 모두 복사</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="toast" class="toast">복사되었습니다!</div>
+
+            <script src="https://unpkg.com/wavesurfer.js@7"></script>
+            <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+            <script>
+                const audioData = "data:audio/mp3;base64,{audio_base64}";
+                
+                const ws = WaveSurfer.create({{
+                    container: '#waveform',
+                    waveColor: '#00e1b5',
+                    progressColor: '#00d2ff',
+                    url: audioData,
+                    height: 120,
+                    responsive: true
+                }});
+                
+                const wsRegions = ws.registerPlugin(WaveSurfer.Regions.create());
+                
+                let activeRegion = null;
+                let isInitialized = false;
+
+                function initRegionAndUI() {{
+                    if (isInitialized) return;
+                    try {{
+                        const duration = ws.getDuration();
+                        if (!duration || isNaN(duration)) return;
+                        
+                        isInitialized = true;
+                        
+                        // 오디오 로딩 완료 시 가장 좌측(0초)부터 가장 우측(끝)까지 꽉 찬 region 생성
+                        activeRegion = wsRegions.addRegion({{
+                            start: 0,
+                            end: duration,
+                            color: 'rgba(255, 75, 75, 0.25)',
+                            drag: true,
+                            resize: true
+                        }});
+                        updateUI(activeRegion);
+                        
+                        // 드래그 선택 기능도 활성화 (영역을 다 지우고 새로 그릴 때 대비)
+                        wsRegions.enableDragSelection({{
+                            color: 'rgba(255, 75, 75, 0.25)',
+                        }});
+                    }} catch (e) {{
+                        console.error("Initialization error in initRegionAndUI:", e);
+                    }}
+                }}
+
+                // decode와 ready 이벤트 모두에 바인딩하여 확실하게 1회 초기화 진행
+                ws.on('decode', () => {{
+                    initRegionAndUI();
+                }});
+
+                ws.on('ready', () => {{
+                    initRegionAndUI();
+                }});
+                
+                // 재생/일시정지 제어
+                document.getElementById('playBtn').addEventListener('click', () => {{
+                    if (activeRegion && !ws.isPlaying()) {{
+                        const curr = ws.getCurrentTime();
+                        if (curr < activeRegion.start || curr > activeRegion.end) {{
+                            ws.setTime(activeRegion.start);
+                        }}
+                    }}
+                    ws.playPause();
+                }});
+                
+                // 줌 제어
+                document.getElementById('zoomSlider').addEventListener('input', (e) => {{
+                    ws.zoom(Number(e.target.value));
+                }});
+                
+                // 반복 재생 제어 (timeupdate 활용)
+                ws.on('timeupdate', () => {{
+                    if (activeRegion && ws.isPlaying()) {{
+                        const curr = ws.getCurrentTime();
+                        if (curr >= activeRegion.end || curr < activeRegion.start) {{
+                            ws.setTime(activeRegion.start);
+                        }}
+                    }}
+                }});
+                
+                wsRegions.on('region-created', (region) => {{
+                    // 단 하나의 영역만 유지
+                    wsRegions.getRegions().forEach(r => {{
+                        if (r !== region) r.destroy();
+                    }});
+                    activeRegion = region;
+                    updateUI(region);
+                }});
+                
+                wsRegions.on('region-updated', (region) => {{
+                    activeRegion = region;
+                    updateUI(region);
+                    
+                    // 조절 중에 재생 바가 영역 밖으로 나가면 영역 시작점으로 복귀
+                    if (ws.isPlaying()) {{
+                        const curr = ws.getCurrentTime();
+                        if (curr < region.start || curr > region.end) {{
+                            ws.setTime(region.start);
+                        }}
+                    }}
+                }});
+                
+                function updateUI(region) {{
+                    const start = region.start.toFixed(2);
+                    const end = region.end.toFixed(2);
+                    
+                    const regionTimeEl = document.getElementById('region-time');
+                    if (regionTimeEl) {{
+                        regionTimeEl.innerHTML = `<span class="time-span">${{start}}s ~ ${{end}}s</span>`;
+                    }}
+                    
+                    // 1. 부모 창 전역 객체 저장 (CORS가 허용될 때 작동하는 fallback)
+                    try {{
+                        window.parent.globalRegionStart = start;
+                        window.parent.globalRegionEnd = end;
+                    }} catch(e) {{
+                        console.warn("Direct window.parent access blocked:", e);
+                    }}
+                    
+                    // 2. 다른 모든 자식 iframe들에게 직접 postMessage 전송 (CORS 격리 우회용 핵심 채널)
+                    try {{
+                        const frames = window.parent.frames;
+                        for (let i = 0; i < frames.length; i++) {{
+                            try {{
+                                frames[i].postMessage({{
+                                    type: 'WAVEFORM_REGION_UPDATE',
+                                    start: start,
+                                    end: end
+                                }}, '*');
+                            }} catch(fe) {{
+                                // cross-origin 등으로 접근 불가능한 프레임은 건너뜀
+                            }}
+                        }}
+                    }} catch(e) {{
+                        console.error("Frame loop postMessage failed:", e);
+                    }}
+                    
+                    const btnStart = document.getElementById('copyStartBtn');
+                    const btnEnd = document.getElementById('copyEndBtn');
+                    const btnBoth = document.getElementById('copyBothBtn');
+                    
+                    if (btnStart && btnEnd && btnBoth) {{
+                        btnStart.disabled = false;
+                        btnEnd.disabled = false;
+                        btnBoth.disabled = false;
+                        
+                        btnStart.onclick = () => copyText(start, '시작 시간');
+                        btnEnd.onclick = () => copyText(end, '종료 시간');
+                        btnBoth.onclick = () => copyText(`${{start}}, ${{end}}`, '시작 및 종료 시간');
+                    }}
+                }}
+                
+                function copyText(text, type) {{
+                    if (navigator.clipboard && navigator.clipboard.writeText) {{
+                        navigator.clipboard.writeText(text).then(() => {{
+                            showToast(`${{type}} 복사 완료: ${{text}}`);
+                        }}).catch(() => {{
+                            fallbackCopy(text, type);
+                        }});
+                    }} else {{
+                        fallbackCopy(text, type);
+                    }}
+                }}
+                
+                function fallbackCopy(text, type) {{
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    textArea.style.position = "fixed";
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    try {{
+                        const successful = document.execCommand('copy');
+                        if (successful) {{
+                            showToast(`${{type}} 복사 완료: ${{text}}`);
+                        }} else {{
+                            alert('복사 실패');
+                        }}
+                    }} catch (err) {{
+                        alert('복사 실패: ' + err);
+                    }}
+                    document.body.removeChild(textArea);
+                }}
+                
+                function showToast(msg) {{
+                    const toast = document.getElementById('toast');
+                    toast.innerText = msg;
+                    toast.classList.add('show');
+                    setTimeout(() => {{
+                        toast.classList.remove('show');
+                    }}, 2000);
+                }}
+            </script>
+            """
+            st.components.v1.html(waveform_html, height=260)
             
             # 3. 편집 인터페이스 설계
             st.write("---")
@@ -1590,7 +2192,7 @@ with tab9:
                     with st.container():
                         st.markdown(f"**[{idx + 1}] {val_d}** (저장 파일명: `{val_c}.mp3`) - {val_a} / {val_b}")
                         
-                        col_num1, col_num2, col_listen = st.columns([2, 2, 2])
+                        col_num1, col_num2, col_control, col_listen = st.columns([2.5, 2.5, 2.0, 2.0])
                         with col_num1:
                             start_val = st.number_input(
                                 f"시작(초) #{idx+1}", 
@@ -1613,6 +2215,8 @@ with tab9:
                                 key=f"end_in_{idx}"
                             )
                             st.session_state.slices_state[idx]["end"] = end_val
+                        with col_control:
+                            rendering_control_buttons(idx)
                         
                         with col_listen:
                             st.write("🔬 미리듣기")
@@ -1690,13 +2294,18 @@ with tab9:
                             st.success(f"🎉 사운드 끊어내기 및 저장 완료! 총 {saved_count}개의 파일이 생성 및 기록되었습니다.")
                             st.info(f"📂 저장 위치: `{os.path.abspath(base_output_dir_t9)}`")
                             
-                            # ZIP 다운로드 지원
-                            zip_data = create_zip_of_directory(base_output_dir_t9)
+                            # ZIP 다운로드 지원 (현재 선택된 교재/단원 하위만 압축)
+                            sub_dir_path = os.path.join(
+                                sanitize_filename(selected_book) if selected_book else "Unassigned",
+                                sanitize_filename(selected_unit)
+                            )
+                            zip_data = create_zip_of_directory(base_output_dir_t9, sub_directory=sub_dir_path)
                             if zip_data:
+                                file_name_zip = f"{sanitize_filename(selected_unit)}_sliced.zip"
                                 st.download_button(
-                                    label="📥 끊어낸 사운드 파일 전체 다운로드 (ZIP)",
+                                    label=f"📥 선택된 단원({selected_unit}) 사운드 다운로드 (ZIP)",
                                     data=zip_data,
-                                    file_name="listening_sounds_sliced.zip",
+                                    file_name=file_name_zip,
                                     mime="application/zip",
                                     use_container_width=True,
                                     key="dl_zip_t9"
