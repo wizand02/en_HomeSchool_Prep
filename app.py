@@ -1121,9 +1121,32 @@ with tab7:
         manual_listen_unit_nm = st.text_input("📑 단원 제목", placeholder="예: Unit 1. Nice to Meet You", key="input_l_unit_nm")
         
     manual_listen_speakers = st.text_input("👤 화자 목록 (쉼표로 구분)", placeholder="예: Sally, John, Teacher", key="input_l_speakers")
-    manual_listen_body = st.text_area("📝 본문 입력 (여러 줄)", height=350, placeholder="여기에 대화 내용을 붙여넣으세요...", key="input_l_body")
+    manual_listen_body = st.text_area("📝 본문 입력 (여러 줄)", height=300, placeholder="여기에 대화 내용을 붙여넣으세요...", key="input_l_body")
 
-    if st.button("▶ 리스닝 입력 완료 및 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
+    # 실시간 미리보기 기능 추가
+    if manual_listen_body:
+        st.write("---")
+        st.write("### 🔍 입력 본문 미리보기 (화자 강조)")
+        st.info("💡 화자 이름이 빨간색 볼드체로 표시됩니다. 줄바꿈(문단 구분) 상태를 확인 후 하단의 엑셀 생성 버튼을 눌러주세요.")
+        
+        # 화자 목록 파싱
+        speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
+        
+        # HTML 렌더링을 통한 화자 강조 및 개행 유지
+        preview_html = manual_listen_body.replace("\n", "<br>")
+        if speakers:
+            for sp in speakers:
+                # 단어 경계(\b)를 고려한 정규식으로 화자 강조 (예외 문자가 들어갈 수 있어 re.escape 사용)
+                pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
+                preview_html = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html)
+        
+        st.markdown(
+            f'<div style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6;">{preview_html}</div>', 
+            unsafe_allow_html=True
+        )
+        st.write("---")
+
+    if st.button("▶ 리스닝 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
         if not manual_listen_book_nm or not manual_listen_unit_nm or not manual_listen_body:
             st.warning("⚠️ 교재 제목, 단원 제목, 본문을 모두 입력해주세요.")
         else:
