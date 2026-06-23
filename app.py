@@ -1850,6 +1850,12 @@ with tab9:
                     color: #fafafa;
                     border: 1px solid #003b73;
                 }}
+                .btn-secondary:not(:disabled) {{
+                    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+                    color: white !important;
+                    border: 1px solid #047857 !important;
+                    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+                }}
                 .btn:hover:not(:disabled) {{
                     opacity: 0.9;
                     transform: translateY(-1px);
