@@ -1530,16 +1530,37 @@ with tab9:
             if len(df_t9.columns) < 4:
                 st.error("⚠️ 엑셀 파일에 적어도 4개의 열(A:교재명, B:단원명, C:파일명, D:영어문장)이 존재해야 합니다.")
             else:
+                # ── 작업 대상 교재 및 단원 필터링 추가 ──────────────────────
+                st.write("#### 🔍 작업 대상 필터링")
+                col_filt1, col_filt2 = st.columns(2)
+                
+                book_col = df_t9.columns[0]
+                books = sorted(list(df_t9[book_col].dropna().astype(str).unique()))
+                with col_filt1:
+                    selected_book = st.selectbox("📚 작업할 교재 선택", books, key="l_edit_sel_book")
+                
+                temp_df = df_t9[df_t9[book_col].astype(str) == selected_book]
+                unit_col = df_t9.columns[1]
+                units = sorted(list(temp_df[unit_col].dropna().astype(str).unique()))
+                with col_filt2:
+                    selected_unit = st.selectbox("📑 작업할 단원 선택", units, key="l_edit_sel_unit")
+                
+                filtered_df = df_t9[
+                    (df_t9[book_col].astype(str) == selected_book) & 
+                    (df_t9[unit_col].astype(str) == selected_unit)
+                ]
+                st.write("---")
+                
                 # 대량의 문장이 올라왔을 때 페이지가 너무 길어지는 문제를 방지하기 위해 10개씩 페이지네이션 지원
                 items_per_page = 10
-                total_items = len(df_t9)
-                total_pages = (total_items - 1) // items_per_page + 1
+                total_items = len(filtered_df)
+                total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
 
                 col_page1, col_page2 = st.columns([1, 4])
                 with col_page1:
                     page_num = st.number_input("페이지 번호", min_value=1, max_value=total_pages, value=1, step=1, key="l_edit_page_num")
                 with col_page2:
-                    st.write(f"총 {total_items}개의 문장이 있습니다. (페이지: {page_num} / {total_pages})")
+                    st.write(f"선택한 교재/단원에 총 {total_items}개의 문장이 있습니다. (페이지: {page_num} / {total_pages})")
 
                 start_idx = (page_num - 1) * items_per_page
                 end_idx = min(start_idx + items_per_page, total_items)
@@ -1549,9 +1570,10 @@ with tab9:
                     st.session_state.slices_state = {}
 
                 st.write("")
-                # 페이지 범위의 데이터만 표시
-                for idx in range(start_idx, end_idx):
-                    row = df_t9.iloc[idx]
+                # 필터링된 데이터에서 해당 페이지 범위 슬라이싱
+                page_df = filtered_df.iloc[start_idx:end_idx]
+                
+                for idx, row in page_df.iterrows():
                     val_a = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ""
                     val_b = str(row.iloc[1]).strip() if not pd.isna(row.iloc[1]) else "Unassigned"
                     val_c = str(row.iloc[2]).strip() if not pd.isna(row.iloc[2]) else ""
@@ -1613,7 +1635,7 @@ with tab9:
                     st.write("---")
 
                 # 일괄 처리 영역
-                st.write("### 📥 모든 문장 사운드 잘라내기 실행")
+                st.write("### 📥 선택된 교재/단원 사운드 잘라내기 실행")
                 st.write("페이지에 관계없이 **시작 및 종료 시간이 올바르게 입력된(시작 < 종료)** 모든 행의 오디오를 잘라내어 저장합니다.")
                 
                 if st.button("▶ 모든 사운드 끊어내기 및 저장 실행", type="primary", use_container_width=True, key="btn_slice_all_run"):
@@ -1622,9 +1644,9 @@ with tab9:
                             saved_count = 0
                             progress_bar_all = st.progress(0)
                             status_text_all = st.empty()
-                            total_rows_t9 = len(df_t9)
+                            total_rows_t9 = len(filtered_df)
 
-                            for index, row in df_t9.iterrows():
+                            for index, row in filtered_df.iterrows():
                                 val_a = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ""
                                 val_b = str(row.iloc[1]).strip() if not pd.isna(row.iloc[1]) else "Unassigned"
                                 val_c = str(row.iloc[2]).strip() if not pd.isna(row.iloc[2]) else ""
