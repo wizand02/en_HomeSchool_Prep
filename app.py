@@ -304,6 +304,9 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
     # speakers 소문자 리스트화
     speakers_lower = [s.strip().lower() for s in speakers] if speakers else []
 
+    # 화자가 2명 이상 등록되어 있을 때만 대화 형식(기본적으로 대화 간 공백을 생략하는 형식)으로 판단
+    is_dialogue = len(speakers_lower) >= 2
+
     for i, p_text in enumerate(paragraphs):
         p_text = p_text.strip()
         if not p_text:
@@ -314,6 +317,9 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
             current_unit = p_text
             sentence_no = 1  # 단원별로 문장 번호 초기화
             continue
+
+        # Topic 문단 여부 판별 (Topic 다음에는 항상 한 줄의 공백 추가)
+        is_topic = p_text.lower().startswith("topic")
 
         # 대화 형식 파싱 (예: "Sally: Hello. How are you?")
         # 화자가 단독으로 오는 경우 ("Sally:")
@@ -328,6 +334,19 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 "F": sound_path
             })
             sentence_no += 1
+            
+            # 문단이 끝난 후 공백 행 추가 검사
+            if i < len(paragraphs) - 1:
+                if is_topic or not is_dialogue:
+                    data.append({
+                        "A": filename_base,
+                        "B": current_unit,
+                        "C": sentence_no,
+                        "D": "",
+                        "E": "",
+                        "F": ""
+                    })
+                    sentence_no += 1
             continue
 
         # 1. 수동 입력 시 화자 목록이 제공되었고, 첫 단어가 화자 목록에 있는 경우
@@ -403,6 +422,20 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         "F": sound_path
                     })
                     sentence_no += 1
+
+        # 문단이 끝난 후 공백 행 추가 검사
+        if i < len(paragraphs) - 1:
+            # Topic 다음이거나, 대화 형식이 아닌 경우(독백/설명문) 공백 행 추가
+            if is_topic or not is_dialogue:
+                data.append({
+                    "A": filename_base,
+                    "B": current_unit,
+                    "C": sentence_no,
+                    "D": "",
+                    "E": "",
+                    "F": ""
+                })
+                sentence_no += 1
 
     return data
 

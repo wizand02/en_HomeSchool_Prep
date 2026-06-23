@@ -3,3 +3,14 @@
 
 
 streamlit run app.py
+
+
+
+
+git push 
+
+
+
+git add app.py
+git commit -m "Add listening script upload, file processing, and manual input tabs"
+git push origin main
