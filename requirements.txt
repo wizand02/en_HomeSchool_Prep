@@ -7,3 +7,4 @@ deep-translator
 nltk
 python-docx
 pydub
+audioop-lts; python_version >= '3.13'
