@@ -295,7 +295,7 @@ def process_listening_excel(sheets_dict):
     return sheets_dict
 
 
-def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers=None, mode="대화", start_sentence_no=1):
+def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers=None, mode="대화", start_sentence_no=1, create_sound_path=True):
     """리스닝 스크립트(문단 리스트)를 문장별로 분할하여 데이터를 정제"""
     try:
         from deep_translator import GoogleTranslator
@@ -340,7 +340,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
         # 대화 형식 파싱 (예: "Sally: Hello. How are you?")
         # 화자가 단독으로 오는 경우 ("Sally:")
         if p_text.endswith(":") and re.match(r"^[A-Za-z0-9\s\-]+:$", p_text):
-            sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+            sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
             data.append({
                 "A": filename_base,
                 "B": current_unit,
@@ -382,7 +382,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                     meaning = translate_polite(translator, body_text)
                     meaning_text = f"{speaker_name}: {meaning}"
                     
-                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
                     data.append({
                         "A": filename_base,
                         "B": current_unit,
@@ -408,7 +408,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         else:
                             meaning_text = meaning
                         
-                        sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                        sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
                         data.append({
                             "A": filename_base,
                             "B": current_unit,
@@ -431,7 +431,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                     meaning = translate_polite(translator, body)
                     meaning_text = f"{speaker} {meaning}"
                     
-                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
                     data.append({
                         "A": filename_base,
                         "B": current_unit,
@@ -455,7 +455,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         else:
                             meaning_text = meaning
                         
-                        sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                        sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
                         data.append({
                             "A": filename_base,
                             "B": current_unit,
@@ -471,7 +471,7 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 for sent in sentences:
                     meaning = translate_polite(translator, sent)
                     
-                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    sound_path = (f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3") if create_sound_path else ""
                     data.append({
                         "A": filename_base,
                         "B": current_unit,
@@ -1330,7 +1330,8 @@ with tab7:
                         paragraphs_1 = [p.strip() for p in manual_listen_body_1.split('\n') if p.strip()]
                         data_1 = parse_listening_paragraphs(
                             paragraphs_1, manual_listen_book_nm, manual_listen_unit_nm, 
-                            speakers=speakers, mode=mode_1, start_sentence_no=current_sentence_no
+                            speakers=speakers, mode=mode_1, start_sentence_no=current_sentence_no,
+                            create_sound_path=False
                         )
                         if data_1:
                             merged_data.extend(data_1)
@@ -1356,7 +1357,8 @@ with tab7:
                         paragraphs_2 = [p.strip() for p in manual_listen_body_2.split('\n') if p.strip()]
                         data_2 = parse_listening_paragraphs(
                             paragraphs_2, manual_listen_book_nm, manual_listen_unit_nm, 
-                            speakers=speakers, mode=mode_2, start_sentence_no=current_sentence_no
+                            speakers=speakers, mode=mode_2, start_sentence_no=current_sentence_no,
+                            create_sound_path=False
                         )
                         if data_2:
                             merged_data.extend(data_2)
