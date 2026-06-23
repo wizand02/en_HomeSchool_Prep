@@ -1171,7 +1171,7 @@ with tab6:
 with tab7:
     st.markdown("""
     교재 제목, 단원 제목, 화자 목록을 공통으로 지정하고,  
-    두 개의 본문 박스에 각각 대화 또는 발표 형식의 스크립트를 입력하여 하나의 리스닝용 엑셀 파일로 변환합니다.
+    여러 개의 본문 박스에 각각 대화 또는 발표 형식의 스크립트를 입력하여 하나의 리스닝용 엑셀 파일로 변환합니다.
     """)
     
     col1_l, col2_l = st.columns(2)
@@ -1182,140 +1182,93 @@ with tab7:
         
     manual_listen_speakers = st.text_input("👤 화자 목록 (쉼표로 구분)", placeholder="예: Sally, John, Teacher", key="input_l_speakers")
     
-    # ── 본문 박스 1 ─────────────────────────
-    st.write("---")
-    st.subheader("📝 본문 박스 1")
-    mode_1 = st.selectbox("형식 선택 (박스 1)", ["대화", "발표"], index=0, key="mode_1")
-    manual_listen_body_1 = st.text_area("본문 입력 1", height=250, placeholder="여기에 첫 번째 대화/발표 내용을 붙여넣으세요...", key="input_l_body_1")
-    
-    if manual_listen_body_1:
-        st.write("🔍 **본문 1 미리보기 (화자 강조 및 편집)**")
-        # 화자 목록 파싱
-        speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
-        preview_html_1 = manual_listen_body_1.replace("\n", "<br>")
-        if speakers:
-            for sp in speakers:
-                pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
-                preview_html_1 = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html_1)
+    # 본문 박스 개수 관리
+    if "num_bodies" not in st.session_state:
+        st.session_state.num_bodies = 2
         
-        lines_count = len(manual_listen_body_1.split('\n'))
-        iframe_height = min(max(200, lines_count * 24 + 110), 450)
-        
-        editor_html_1 = f"""
-        <div style="margin-bottom: 10px;">
-            <button id="apply-btn-1" style="padding: 6px 12px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
-                ✍️ 줄바꿈 수정사항 본문 1에 반영하기
-            </button>
-        </div>
-        <div id="editor-1" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; max-height: 280px; overflow-y: auto; outline:none; color:inherit; background-color:transparent;">
-            {preview_html_1}
-        </div>
-
-        <script>
-        document.getElementById('apply-btn-1').addEventListener('click', () => {{
-            const editor = document.getElementById('editor-1');
-            const editedText = editor.innerText;
+    col_btn1, col_btn2 = st.columns([1, 4])
+    with col_btn1:
+        if st.button("➕ 본문 박스 추가", key="add_body_btn"):
+            st.session_state.num_bodies += 1
+            st.rerun()
             
-            try {{
-                const parentDocs = window.parent.document;
-                const textareas = parentDocs.querySelectorAll('textarea');
-                let targetTextarea = null;
-                
-                for (let ta of textareas) {{
-                    if (ta.placeholder && ta.placeholder.includes("여기에 첫 번째 대화/발표 내용을 붙여넣으세요")) {{
-                        targetTextarea = ta;
-                        break;
-                    }}
-                }}
-                
-                if (targetTextarea) {{
-                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                    nativeTextAreaValueSetter.call(targetTextarea, editedText);
-                    const event = new Event('input', {{ bubbles: true }});
-                    targetTextarea.dispatchEvent(event);
-                    alert('✅ 수정사항이 본문 입력 1에 성공적으로 반영되었습니다!');
-                }} else {{
-                    navigator.clipboard.writeText(editedText);
-                    alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
-                }}
-            }} catch (e) {{
-                navigator.clipboard.writeText(editedText);
-                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력 1에 전체 붙여넣기(Ctrl+V) 해주세요!');
-            }}
-        }});
-        </script>
-        """
-        st.components.v1.html(editor_html_1, height=iframe_height)
-        st.write("---")
-
-    # ── 본문 박스 2 ─────────────────────────
-    st.subheader("📝 본문 박스 2")
-    mode_2 = st.selectbox("형식 선택 (박스 2)", ["대화", "발표"], index=1, key="mode_2")
-    manual_listen_body_2 = st.text_area("본문 입력 2", height=250, placeholder="여기에 두 번째 대화/발표 내용을 붙여넣으세요...", key="input_l_body_2")
+    bodies_data = []
     
-    if manual_listen_body_2:
-        st.write("🔍 **본문 2 미리보기 (화자 강조 및 편집)**")
-        # 화자 목록 파싱
-        speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
-        preview_html_2 = manual_listen_body_2.replace("\n", "<br>")
-        if speakers:
-            for sp in speakers:
-                pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
-                preview_html_2 = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html_2)
-        
-        lines_count = len(manual_listen_body_2.split('\n'))
-        iframe_height = min(max(200, lines_count * 24 + 110), 450)
-        
-        editor_html_2 = f"""
-        <div style="margin-bottom: 10px;">
-            <button id="apply-btn-2" style="padding: 6px 12px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
-                ✍️ 줄바꿈 수정사항 본문 2에 반영하기
-            </button>
-        </div>
-        <div id="editor-2" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; max-height: 280px; overflow-y: auto; outline:none; color:inherit; background-color:transparent;">
-            {preview_html_2}
-        </div>
-
-        <script>
-        document.getElementById('apply-btn-2').addEventListener('click', () => {{
-            const editor = document.getElementById('editor-2');
-            const editedText = editor.innerText;
-            
-            try {{
-                const parentDocs = window.parent.document;
-                const textareas = parentDocs.querySelectorAll('textarea');
-                let targetTextarea = null;
-                
-                for (let ta of textareas) {{
-                    if (ta.placeholder && ta.placeholder.includes("여기에 두 번째 대화/발표 내용을 붙여넣으세요")) {{
-                        targetTextarea = ta;
-                        break;
-                    }}
-                }}
-                
-                if (targetTextarea) {{
-                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                    nativeTextAreaValueSetter.call(targetTextarea, editedText);
-                    const event = new Event('input', {{ bubbles: true }});
-                    targetTextarea.dispatchEvent(event);
-                    alert('✅ 수정사항이 본문 입력 2에 성공적으로 반영되었습니다!');
-                }} else {{
-                    navigator.clipboard.writeText(editedText);
-                    alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
-                }}
-            }} catch (e) {{
-                navigator.clipboard.writeText(editedText);
-                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력 2에 전체 붙여넣기(Ctrl+V) 해주세요!');
-            }}
-        }});
-        </script>
-        """
-        st.components.v1.html(editor_html_2, height=iframe_height)
+    for i in range(1, st.session_state.num_bodies + 1):
         st.write("---")
+        st.subheader(f"📝 본문 박스 {i}")
+        
+        default_idx = 0 if i == 1 else 1
+        mode_i = st.selectbox(f"형식 선택 (박스 {i})", ["대화", "발표"], index=default_idx, key=f"mode_{i}")
+        placeholder_text = f"여기에 {i}번째 대화/발표 내용을 붙여넣으세요..."
+        body_text_i = st.text_area(f"본문 입력 {i}", height=250, placeholder=placeholder_text, key=f"input_l_body_{i}")
+        
+        bodies_data.append((body_text_i, mode_i, i))
+        
+        if body_text_i:
+            st.write(f"🔍 **본문 {i} 미리보기 (화자 강조 및 편집)**")
+            # 화자 목록 파싱
+            speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
+            preview_html = body_text_i.replace("\n", "<br>")
+            if speakers:
+                for sp in speakers:
+                    pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
+                    preview_html = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html)
+            
+            lines_count = len(body_text_i.split('\n'))
+            iframe_height = min(max(200, lines_count * 24 + 110), 450)
+            
+            editor_html = f"""
+            <div style="margin-bottom: 10px;">
+                <button id="apply-btn-{i}" style="padding: 6px 12px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
+                    ✍️ 줄바꿈 수정사항 본문 {i}에 반영하기
+                </button>
+            </div>
+            <div id="editor-{i}" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; max-height: 280px; overflow-y: auto; outline:none; color:inherit; background-color:transparent;">
+                {preview_html}
+            </div>
+
+            <script>
+            document.getElementById('apply-btn-{i}').addEventListener('click', () => {{
+                const editor = document.getElementById('editor-{i}');
+                const editedText = editor.innerText;
+                
+                try {{
+                    const parentDocs = window.parent.document;
+                    const textareas = parentDocs.querySelectorAll('textarea');
+                    let targetTextarea = null;
+                    
+                    for (let ta of textareas) {{
+                        if (ta.placeholder && ta.placeholder.includes("여기에 {i}번째 대화/발표 내용을 붙여넣으세요")) {{
+                            targetTextarea = ta;
+                            break;
+                        }}
+                    }}
+                    
+                    if (targetTextarea) {{
+                        const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                        nativeTextAreaValueSetter.call(targetTextarea, editedText);
+                        const event = new Event('input', {{ bubbles: true }});
+                        targetTextarea.dispatchEvent(event);
+                        alert('✅ 수정사항이 본문 입력 {i}에 성공적으로 반영되었습니다!');
+                    }} else {{
+                        navigator.clipboard.writeText(editedText);
+                        alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
+                    }}
+                }} catch (e) {{
+                    navigator.clipboard.writeText(editedText);
+                    alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력 {i}에 전체 붙여넣기(Ctrl+V) 해주세요!');
+                }}
+            }});
+            </script>
+            """
+            st.components.v1.html(editor_html, height=iframe_height)
+            st.write("---")
 
     # ── 엑셀 생성 및 병합 ───────────────────────
     if st.button("▶ 리스닝 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
-        if not manual_listen_book_nm or not manual_listen_unit_nm or (not manual_listen_body_1 and not manual_listen_body_2):
+        any_body_filled = any(text.strip() for text, _, _ in bodies_data)
+        if not manual_listen_book_nm or not manual_listen_unit_nm or not any_body_filled:
             st.warning("⚠️ 교재 제목, 단원 제목 및 적어도 하나의 본문 내용을 입력해주세요.")
         else:
             with st.spinner("처리 중입니다..."):
@@ -1325,43 +1278,32 @@ with tab7:
                     merged_data = []
                     current_sentence_no = 1
                     
-                    # 본문 1 처리
-                    if manual_listen_body_1.strip():
-                        paragraphs_1 = [p.strip() for p in manual_listen_body_1.split('\n') if p.strip()]
-                        data_1 = parse_listening_paragraphs(
-                            paragraphs_1, manual_listen_book_nm, manual_listen_unit_nm, 
-                            speakers=speakers, mode=mode_1, start_sentence_no=current_sentence_no,
+                    filled_bodies = [(text, mode, idx) for text, mode, idx in bodies_data if text.strip()]
+                    
+                    for idx_f, (body_text, mode, idx) in enumerate(filled_bodies):
+                        paragraphs = [p.strip() for p in body_text.split('\n') if p.strip()]
+                        data_i = parse_listening_paragraphs(
+                            paragraphs, manual_listen_book_nm, manual_listen_unit_nm, 
+                            speakers=speakers, mode=mode, start_sentence_no=current_sentence_no,
                             create_sound_path=False
                         )
-                        if data_1:
-                            merged_data.extend(data_1)
-                            # 마지막 문장 번호 확인 후 다음 시작 번호 세팅
-                            valid_nums = [item["C"] for item in data_1 if item["C"]]
+                        if data_i:
+                            merged_data.extend(data_i)
+                            valid_nums = [item["C"] for item in data_i if item["C"]]
                             if valid_nums:
                                 current_sentence_no = max(valid_nums) + 1
-                    
-                    # 본문 박스 1과 2가 둘 다 채워져 있을 때, 구분용 공백 행 하나 삽입
-                    if manual_listen_body_1.strip() and manual_listen_body_2.strip():
-                        merged_data.append({
-                            "A": manual_listen_book_nm,
-                            "B": manual_listen_unit_nm,
-                            "C": current_sentence_no,
-                            "D": "",
-                            "E": "",
-                            "F": ""
-                        })
-                        current_sentence_no += 1
                                 
-                    # 본문 2 처리
-                    if manual_listen_body_2.strip():
-                        paragraphs_2 = [p.strip() for p in manual_listen_body_2.split('\n') if p.strip()]
-                        data_2 = parse_listening_paragraphs(
-                            paragraphs_2, manual_listen_book_nm, manual_listen_unit_nm, 
-                            speakers=speakers, mode=mode_2, start_sentence_no=current_sentence_no,
-                            create_sound_path=False
-                        )
-                        if data_2:
-                            merged_data.extend(data_2)
+                        # 마지막 본문이 아니라면 구분용 공백 행 삽입
+                        if idx_f < len(filled_bodies) - 1:
+                            merged_data.append({
+                                "A": manual_listen_book_nm,
+                                "B": manual_listen_unit_nm,
+                                "C": current_sentence_no,
+                                "D": "",
+                                "E": "",
+                                "F": ""
+                            })
+                            current_sentence_no += 1
                     
                     if merged_data:
                         manual_listen_df = pd.DataFrame(merged_data)
