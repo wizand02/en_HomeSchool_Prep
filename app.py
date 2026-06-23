@@ -338,7 +338,7 @@ def process_listening_excel(sheets_dict):
     return sheets_dict
 
 
-def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers=None):
+def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers=None, mode="대화", start_sentence_no=1):
     """리스닝 스크립트(문단 리스트)를 문장별로 분할하여 데이터를 정제"""
     try:
         from deep_translator import GoogleTranslator
@@ -358,13 +358,13 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
         nltk.download('punkt', quiet=True)
 
     data = []
-    sentence_no = 1
+    sentence_no = start_sentence_no
 
     # speakers 소문자 리스트화
     speakers_lower = [s.strip().lower() for s in speakers] if speakers else []
 
-    # 화자가 2명 이상 등록되어 있을 때만 대화 형식(기본적으로 대화 간 공백을 생략하는 형식)으로 판단
-    is_dialogue = len(speakers_lower) >= 2
+    # 대화 형식인 경우에만 기본적으로 대화 간 공백을 생략하는 형식으로 판단
+    is_dialogue = (mode == "대화")
 
     for i, p_text in enumerate(paragraphs):
         p_text = p_text.strip()
@@ -419,19 +419,11 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                 speaker_name = first_word_raw.rstrip(":")
                 body_text = p_text[len(first_word_raw):].strip().lstrip(":").strip()
                 
-                sentences = nltk.sent_tokenize(body_text)
-                for idx, sent in enumerate(sentences):
-                    # 첫 번째 문장에만 화자 이름 결합, 이후 문장은 본문만
-                    if idx == 0:
-                        sent_text = f"{speaker_name}: {sent}"
-                    else:
-                        sent_text = sent
-                        
-                    meaning = translate_polite(translator, sent)
-                    if idx == 0:
-                        meaning_text = f"{speaker_name}: {meaning}"
-                    else:
-                        meaning_text = meaning
+                if mode == "대화":
+                    # '대화' 형식: 한 화자의 문장이 둘 이상이더라도 하나의 sentence로 한 줄에 표시
+                    sent_text = f"{speaker_name}: {body_text}"
+                    meaning = translate_polite(translator, body_text)
+                    meaning_text = f"{speaker_name}: {meaning}"
                     
                     sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
                     data.append({
@@ -443,6 +435,32 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         "F": sound_path
                     })
                     sentence_no += 1
+                else:
+                    # '발표' 형식: 문장별로 쪼갠다.
+                    sentences = nltk.sent_tokenize(body_text)
+                    for idx, sent in enumerate(sentences):
+                        # 첫 번째 문장에만 화자 이름 결합, 이후 문장은 본문만
+                        if idx == 0:
+                            sent_text = f"{speaker_name}: {sent}"
+                        else:
+                            sent_text = sent
+                            
+                        meaning = translate_polite(translator, sent)
+                        if idx == 0:
+                            meaning_text = f"{speaker_name}: {meaning}"
+                        else:
+                            meaning_text = meaning
+                        
+                        sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                        data.append({
+                            "A": filename_base,
+                            "B": current_unit,
+                            "C": sentence_no,
+                            "D": sent_text,
+                            "E": meaning_text,
+                            "F": sound_path
+                        })
+                        sentence_no += 1
 
         if not is_speaker_found:
             # "Sally: Hello..." 같은 형식 판별
@@ -450,18 +468,11 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
             if match:
                 speaker = match.group(1).strip()
                 body = match.group(2).strip()
-                sentences = nltk.sent_tokenize(body)
-                for idx, sent in enumerate(sentences):
-                    if idx == 0:
-                        sent_text = f"{speaker} {sent}"
-                    else:
-                        sent_text = sent
-                        
-                    meaning = translate_polite(translator, sent)
-                    if idx == 0:
-                        meaning_text = f"{speaker} {meaning}"
-                    else:
-                        meaning_text = meaning
+                
+                if mode == "대화":
+                    sent_text = f"{speaker} {body}"
+                    meaning = translate_polite(translator, body)
+                    meaning_text = f"{speaker} {meaning}"
                     
                     sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
                     data.append({
@@ -473,6 +484,30 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                         "F": sound_path
                     })
                     sentence_no += 1
+                else:
+                    sentences = nltk.sent_tokenize(body)
+                    for idx, sent in enumerate(sentences):
+                        if idx == 0:
+                            sent_text = f"{speaker} {sent}"
+                        else:
+                            sent_text = sent
+                            
+                        meaning = translate_polite(translator, sent)
+                        if idx == 0:
+                            meaning_text = f"{speaker} {meaning}"
+                        else:
+                            meaning_text = meaning
+                        
+                        sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                        data.append({
+                            "A": filename_base,
+                            "B": current_unit,
+                            "C": sentence_no,
+                            "D": sent_text,
+                            "E": meaning_text,
+                            "F": sound_path
+                        })
+                        sentence_no += 1
             else:
                 # 일반 서술문
                 sentences = nltk.sent_tokenize(p_text)
@@ -1178,7 +1213,8 @@ with tab6:
 # ==========================================
 with tab7:
     st.markdown("""
-    교재 제목, 단원 제목, 화자 목록, 그리고 대화 스크립트를 직접 입력하여 리스닝용 엑셀 파일로 변환합니다.
+    교재 제목, 단원 제목, 화자 목록을 공통으로 지정하고,  
+    두 개의 본문 박스에 각각 대화 또는 발표 형식의 스크립트를 입력하여 하나의 리스닝용 엑셀 파일로 변환합니다.
     """)
     
     col1_l, col2_l = st.columns(2)
@@ -1188,42 +1224,39 @@ with tab7:
         manual_listen_unit_nm = st.text_input("📑 단원 제목", placeholder="예: Unit 1. Nice to Meet You", key="input_l_unit_nm")
         
     manual_listen_speakers = st.text_input("👤 화자 목록 (쉼표로 구분)", placeholder="예: Sally, John, Teacher", key="input_l_speakers")
-    manual_listen_body = st.text_area("📝 본문 입력 (여러 줄)", height=300, placeholder="여기에 대화 내용을 붙여넣으세요...", key="input_l_body")
-
-    # 실시간 미리보기 기능 추가
-    if manual_listen_body:
-        st.write("---")
-        st.write("### 🔍 입력 본문 미리보기 (화자 강조 및 편집)")
-        st.info("💡 아래 박스에서 직접 문장을 수정하거나 줄바꿈을 편집할 수 있습니다. 편집 후 [✍️ 줄바꿈 수정사항 본문에 반영하기] 버튼을 클릭하세요.")
-        
+    
+    # ── 본문 박스 1 ─────────────────────────
+    st.write("---")
+    st.subheader("📝 본문 박스 1")
+    mode_1 = st.selectbox("형식 선택 (박스 1)", ["대화", "발표"], index=0, key="mode_1")
+    manual_listen_body_1 = st.text_area("본문 입력 1", height=250, placeholder="여기에 첫 번째 대화/발표 내용을 붙여넣으세요...", key="input_l_body_1")
+    
+    if manual_listen_body_1:
+        st.write("🔍 **본문 1 미리보기 (화자 강조 및 편집)**")
         # 화자 목록 파싱
         speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
-        
-        # HTML 렌더링을 통한 화자 강조 및 개행 유지
-        preview_html = manual_listen_body.replace("\n", "<br>")
+        preview_html_1 = manual_listen_body_1.replace("\n", "<br>")
         if speakers:
             for sp in speakers:
-                # 단어 경계(\b)를 고려한 정규식으로 화자 강조 (예외 문자가 들어갈 수 있어 re.escape 사용)
                 pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
-                preview_html = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html)
+                preview_html_1 = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html_1)
         
-        # iframe 높이를 본문 길이에 따라 유동적으로 계산 (최소 200px, 최대 600px)
-        lines_count = len(manual_listen_body.split('\n'))
-        iframe_height = min(max(200, lines_count * 24 + 100), 600)
+        lines_count = len(manual_listen_body_1.split('\n'))
+        iframe_height = min(max(200, lines_count * 24 + 110), 450)
         
-        editor_html = f"""
-        <div id="editor" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; outline:none; color:inherit; background-color:transparent;">
-            {preview_html}
-        </div>
-        <div style="margin-top: 10px;">
-            <button id="apply-btn" style="padding: 8px 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
-                ✍️ 줄바꿈 수정사항 본문에 반영하기
+        editor_html_1 = f"""
+        <div style="margin-bottom: 10px;">
+            <button id="apply-btn-1" style="padding: 6px 12px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
+                ✍️ 줄바꿈 수정사항 본문 1에 반영하기
             </button>
+        </div>
+        <div id="editor-1" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; max-height: 280px; overflow-y: auto; outline:none; color:inherit; background-color:transparent;">
+            {preview_html_1}
         </div>
 
         <script>
-        document.getElementById('apply-btn').addEventListener('click', () => {{
-            const editor = document.getElementById('editor');
+        document.getElementById('apply-btn-1').addEventListener('click', () => {{
+            const editor = document.getElementById('editor-1');
             const editedText = editor.innerText;
             
             try {{
@@ -1232,51 +1265,147 @@ with tab7:
                 let targetTextarea = null;
                 
                 for (let ta of textareas) {{
-                    if (ta.placeholder && ta.placeholder.includes("여기에 대화 내용을 붙여넣으세요")) {{
+                    if (ta.placeholder && ta.placeholder.includes("여기에 첫 번째 대화/발표 내용을 붙여넣으세요")) {{
                         targetTextarea = ta;
                         break;
                     }}
                 }}
                 
                 if (targetTextarea) {{
-                    // React value setter trigger
                     const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
                     nativeTextAreaValueSetter.call(targetTextarea, editedText);
-                    
                     const event = new Event('input', {{ bubbles: true }});
                     targetTextarea.dispatchEvent(event);
-                    
-                    alert('✅ 수정사항이 본문 입력창에 성공적으로 반영되었습니다!');
+                    alert('✅ 수정사항이 본문 입력 1에 성공적으로 반영되었습니다!');
                 }} else {{
                     navigator.clipboard.writeText(editedText);
                     alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
                 }}
             }} catch (e) {{
                 navigator.clipboard.writeText(editedText);
-                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력창에 전체 붙여넣기(Ctrl+V) 해주세요!');
+                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력 1에 전체 붙여넣기(Ctrl+V) 해주세요!');
             }}
         }});
         </script>
         """
-        
-        st.components.v1.html(editor_html, height=iframe_height)
+        st.components.v1.html(editor_html_1, height=iframe_height)
         st.write("---")
 
+    # ── 본문 박스 2 ─────────────────────────
+    st.subheader("📝 본문 박스 2")
+    mode_2 = st.selectbox("형식 선택 (박스 2)", ["대화", "발표"], index=1, key="mode_2")
+    manual_listen_body_2 = st.text_area("본문 입력 2", height=250, placeholder="여기에 두 번째 대화/발표 내용을 붙여넣으세요...", key="input_l_body_2")
+    
+    if manual_listen_body_2:
+        st.write("🔍 **본문 2 미리보기 (화자 강조 및 편집)**")
+        # 화자 목록 파싱
+        speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
+        preview_html_2 = manual_listen_body_2.replace("\n", "<br>")
+        if speakers:
+            for sp in speakers:
+                pattern = re.compile(rf"\b({re.escape(sp)})\b", re.IGNORECASE)
+                preview_html_2 = pattern.sub(r'<span style="color:red; font-weight:bold;">\1</span>', preview_html_2)
+        
+        lines_count = len(manual_listen_body_2.split('\n'))
+        iframe_height = min(max(200, lines_count * 24 + 110), 450)
+        
+        editor_html_2 = f"""
+        <div style="margin-bottom: 10px;">
+            <button id="apply-btn-2" style="padding: 6px 12px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: sans-serif;">
+                ✍️ 줄바꿈 수정사항 본문 2에 반영하기
+            </button>
+        </div>
+        <div id="editor-2" contenteditable="true" style="border:1px solid #555; padding:15px; border-radius:5px; line-height:1.6; font-family: sans-serif; min-height:100px; max-height: 280px; overflow-y: auto; outline:none; color:inherit; background-color:transparent;">
+            {preview_html_2}
+        </div>
+
+        <script>
+        document.getElementById('apply-btn-2').addEventListener('click', () => {{
+            const editor = document.getElementById('editor-2');
+            const editedText = editor.innerText;
+            
+            try {{
+                const parentDocs = window.parent.document;
+                const textareas = parentDocs.querySelectorAll('textarea');
+                let targetTextarea = null;
+                
+                for (let ta of textareas) {{
+                    if (ta.placeholder && ta.placeholder.includes("여기에 두 번째 대화/발표 내용을 붙여넣으세요")) {{
+                        targetTextarea = ta;
+                        break;
+                    }}
+                }}
+                
+                if (targetTextarea) {{
+                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                    nativeTextAreaValueSetter.call(targetTextarea, editedText);
+                    const event = new Event('input', {{ bubbles: true }});
+                    targetTextarea.dispatchEvent(event);
+                    alert('✅ 수정사항이 본문 입력 2에 성공적으로 반영되었습니다!');
+                }} else {{
+                    navigator.clipboard.writeText(editedText);
+                    alert('입력창을 직접 찾지 못해 수정된 텍스트를 클립보드에 복사했습니다. 위의 입력창에 붙여넣어(Ctrl+V) 주세요!');
+                }}
+            }} catch (e) {{
+                navigator.clipboard.writeText(editedText);
+                alert('수정된 텍스트가 클립보드에 복사되었습니다. 위의 본문 입력 2에 전체 붙여넣기(Ctrl+V) 해주세요!');
+            }}
+        }});
+        </script>
+        """
+        st.components.v1.html(editor_html_2, height=iframe_height)
+        st.write("---")
+
+    # ── 엑셀 생성 및 병합 ───────────────────────
     if st.button("▶ 리스닝 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
-        if not manual_listen_book_nm or not manual_listen_unit_nm or not manual_listen_body:
-            st.warning("⚠️ 교재 제목, 단원 제목, 본문을 모두 입력해주세요.")
+        if not manual_listen_book_nm or not manual_listen_unit_nm or (not manual_listen_body_1 and not manual_listen_body_2):
+            st.warning("⚠️ 교재 제목, 단원 제목 및 적어도 하나의 본문 내용을 입력해주세요.")
         else:
             with st.spinner("처리 중입니다..."):
                 try:
-                    paragraphs = [p.strip() for p in manual_listen_body.split('\n') if p.strip()]
-                    
-                    # 화자 목록 파싱
                     speakers = [s.strip() for s in manual_listen_speakers.split(",") if s.strip()] if manual_listen_speakers else []
                     
-                    manual_listen_data = parse_listening_paragraphs(paragraphs, manual_listen_book_nm, manual_listen_unit_nm, speakers=speakers)
+                    merged_data = []
+                    current_sentence_no = 1
                     
-                    if manual_listen_data:
-                        manual_listen_df = pd.DataFrame(manual_listen_data)
+                    # 본문 1 처리
+                    if manual_listen_body_1.strip():
+                        paragraphs_1 = [p.strip() for p in manual_listen_body_1.split('\n') if p.strip()]
+                        data_1 = parse_listening_paragraphs(
+                            paragraphs_1, manual_listen_book_nm, manual_listen_unit_nm, 
+                            speakers=speakers, mode=mode_1, start_sentence_no=current_sentence_no
+                        )
+                        if data_1:
+                            merged_data.extend(data_1)
+                            # 마지막 문장 번호 확인 후 다음 시작 번호 세팅
+                            valid_nums = [item["C"] for item in data_1 if item["C"]]
+                            if valid_nums:
+                                current_sentence_no = max(valid_nums) + 1
+                    
+                    # 본문 박스 1과 2가 둘 다 채워져 있을 때, 구분용 공백 행 하나 삽입
+                    if manual_listen_body_1.strip() and manual_listen_body_2.strip():
+                        merged_data.append({
+                            "A": manual_listen_book_nm,
+                            "B": manual_listen_unit_nm,
+                            "C": current_sentence_no,
+                            "D": "",
+                            "E": "",
+                            "F": ""
+                        })
+                        current_sentence_no += 1
+                                
+                    # 본문 2 처리
+                    if manual_listen_body_2.strip():
+                        paragraphs_2 = [p.strip() for p in manual_listen_body_2.split('\n') if p.strip()]
+                        data_2 = parse_listening_paragraphs(
+                            paragraphs_2, manual_listen_book_nm, manual_listen_unit_nm, 
+                            speakers=speakers, mode=mode_2, start_sentence_no=current_sentence_no
+                        )
+                        if data_2:
+                            merged_data.extend(data_2)
+                    
+                    if merged_data:
+                        manual_listen_df = pd.DataFrame(merged_data)
                         manual_listen_df.columns = ["파일명", "Unit명", "문장번호", "영어문장", "한글해석", "사운드경로"]
                         
                         st.success("✅ 변환이 완료되었습니다!")
