@@ -1,0 +1,7 @@
+output_sounds/
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+venv/
+.venv/

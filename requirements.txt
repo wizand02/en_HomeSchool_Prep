@@ -1,0 +1,8 @@
+streamlit
+pandas
+openpyxl
+gTTS
+eng-to-ipa
+deep-translator
+nltk
+python-docx
