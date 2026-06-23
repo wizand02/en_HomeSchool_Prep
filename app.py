@@ -404,18 +404,6 @@ def parse_listening_paragraphs(paragraphs, filename_base, current_unit, speakers
                     })
                     sentence_no += 1
 
-        # 문단이 바뀔 때 공백 행 추가
-        if i < len(paragraphs) - 1:
-            data.append({
-                "A": filename_base,
-                "B": current_unit,
-                "C": sentence_no,
-                "D": "",
-                "E": "",
-                "F": ""
-            })
-            sentence_no += 1
-
     return data
 
 
