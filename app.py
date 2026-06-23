@@ -775,6 +775,8 @@ window.addEventListener('message', (event) => {
     // 2-D. 클립보드 복사 요청 처리
     if (data.type === 'COPY_CLIPBOARD') {
         const text = data.text;
+        // 부모 전역에 마지막 복사 텍스트 보관 (PASTE 릴레이용)
+        window.latestClipboard = text;
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).catch(err => {
                 console.error('Clipboard copy fail:', err);
@@ -788,6 +790,32 @@ window.addEventListener('message', (event) => {
             textArea.select();
             document.execCommand('copy');
             document.body.removeChild(textArea);
+        }
+    }
+
+    // 2-E. PASTE 버튼 클릭 시 부모에 저장된 클립보드 텍스트로 인풋 갱신
+    if (data.type === 'PASTE_FROM_CLIPBOARD') {
+        const idx = data.idx;
+        const clipText = window.latestClipboard;
+        if (!clipText) {
+            alert('붙여넣을 값이 없습니다. 먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
+            return;
+        }
+        const parts = clipText.split(',');
+        if (parts.length === 2) {
+            const startVal = parseFloat(parts[0].trim());
+            const endVal = parseFloat(parts[1].trim());
+            if (!isNaN(startVal) && !isNaN(endVal)) {
+                setInputValue('시작(초) #' + (idx + 1), startVal.toFixed(2), () => {
+                    setTimeout(() => {
+                        setInputValue('종료(초) #' + (idx + 1), endVal.toFixed(2), null);
+                    }, 200);
+                });
+            } else {
+                alert('시간 형식이 올바르지 않습니다.');
+            }
+        } else {
+            alert('붙여넣을 데이터 형식이 올바르지 않습니다. (예: 1.25, 4.80)\n먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
         }
     }
 });
@@ -1707,43 +1735,12 @@ with tab9:
         }});
 
         document.getElementById('pasteBtn_{idx}').addEventListener('click', () => {{
-            try {{
-                if (!navigator.clipboard || !navigator.clipboard.readText) {{
-                    const clipText = prompt('클립보드 내용을 여기에 붙여넣어주세요 (형식: 시작, 종료):');
-                    if (clipText) {{
-                        processText(clipText);
-                    }}
-                    return;
-                }}
-                
-                navigator.clipboard.readText().then(clipText => {{
-                    processText(clipText);
-                }}).catch(err => {{
-                    const clipText = prompt('클립보드 읽기 권한이 거부되었습니다. 복사한 값을 직접 붙여넣어주세요:', '');
-                    if (clipText) {{
-                        processText(clipText);
-                    }}
-                }});
-            }} catch (e) {{
-                alert('PASTE 오류: ' + e.message);
-            }}
+            // 부모 창의 latestClipboard 저장값을 릴레이로 인풋에 반영 (CORS 안전)
+            window.parent.postMessage({{
+                type: 'PASTE_FROM_CLIPBOARD',
+                idx: {idx}
+            }}, '*');
         }});
-
-        function processText(clipText) {{
-            if (!clipText) return;
-            const parts = clipText.split(',');
-            if (parts.length === 2) {{
-                const start = parseFloat(parts[0].trim());
-                const end = parseFloat(parts[1].trim());
-                if (!isNaN(start) && !isNaN(end)) {{
-                    updateInputs(start.toFixed(2), end.toFixed(2));
-                }} else {{
-                    alert('시간 형식이 올바르지 않습니다.');
-                }}
-            }} else {{
-                alert('복사된 데이터 형식이 올바르지 않습니다. (예: 1.25, 4.80)');
-            }}
-        }}
         </script>
         """
         st.components.v1.html(html_code, height=72, scrolling=False)
