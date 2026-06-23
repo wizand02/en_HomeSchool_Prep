@@ -666,7 +666,7 @@ if (!window.hasStreamlitListener) {
                     const text = label.innerText.trim();
                     if (text.startsWith('시작(초) #') || text.startsWith('종료(초) #')) {
                         const htmlFor = label.getAttribute('for');
-                        const input = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']').querySelector('input[type=\\'number\\']');
+                        const input = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']')?.querySelector('input[type=\\'number\\']');
                         if (input && !input.readOnly && document.activeElement !== input) {
                             input.readOnly = true;
                             input.style.pointerEvents = 'none';
@@ -694,7 +694,7 @@ if (!window.hasStreamlitListener) {
                 for (let label of labels) {
                     if (label.innerText.trim() === labelText) {
                         const htmlFor = label.getAttribute('for');
-                        targetInput = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']').querySelector('input[type=\\'number\\']');
+                        targetInput = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']')?.querySelector('input[type=\\'number\\']');
                         break;
                     }
                 }
