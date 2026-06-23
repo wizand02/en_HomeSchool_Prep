@@ -222,6 +222,168 @@ def process_reading_excel(sheets_dict):
     return sheets_dict
 
 
+def process_listening_excel(sheets_dict):
+    """리스닝 파일의 모든 워크시트('본문', '단어') 처리"""
+    try:
+        from deep_translator import GoogleTranslator
+        translator = GoogleTranslator(source='en', target='ko')
+    except ImportError:
+        st.error("deep-translator 라이브러리가 필요합니다. 'pip install deep-translator'를 실행해주세요.")
+        return sheets_dict
+
+    # 1. '본문' 워크시트 처리 (D열 -> E열)
+    if '본문' in sheets_dict:
+        st.info("🎧 '본문' 시트의 해석을 업데이트합니다...")
+        df = sheets_dict['본문']
+        while len(df.columns) < 5:
+            df[f"Column_{len(df.columns)}"] = ""
+        
+        progress_bar = st.progress(0)
+        for index, row in df.iterrows():
+            val_d = str(df.iat[index, 3]).strip() if not pd.isna(df.iat[index, 3]) else ""
+            if val_d:
+                existing_e = df.iat[index, 4]
+                if pd.isna(existing_e) or str(existing_e).strip() == "":
+                    # "Sally:" 와 같이 콜론으로 끝나는 텍스트는 화자를 의미하므로 그대로 복사
+                    if val_d.endswith(':'):
+                        df.iat[index, 4] = val_d
+                    else:
+                        try:
+                            df.iat[index, 4] = translator.translate(val_d)
+                        except Exception as e:
+                            st.warning(f"본문 번역 오류 (행 {index+2}): {e}")
+            progress_bar.progress((index + 1) / len(df))
+        st.success("'본문' 시트 처리 완료")
+
+    # 2. '단어' 워크시트 처리 (C열 -> D열)
+    if '단어' in sheets_dict:
+        st.info("📖 '단어' 시트의 뜻을 업데이트합니다...")
+        df = sheets_dict['단어']
+        while len(df.columns) < 4:
+            df[f"Column_{len(df.columns)}"] = ""
+            
+        progress_bar = st.progress(0)
+        for index, row in df.iterrows():
+            val_c = str(df.iat[index, 2]).strip() if not pd.isna(df.iat[index, 2]) else ""
+            if val_c:
+                # D열이 비어있는 경우에만 번역 수행
+                existing_d = df.iat[index, 3]
+                if pd.isna(existing_d) or str(existing_d).strip() == "":
+                    try:
+                        df.iat[index, 3] = translator.translate(val_c)
+                    except Exception as e:
+                        st.warning(f"단어 번역 오류 (행 {index+2}): {e}")
+            progress_bar.progress((index + 1) / len(df))
+        st.success("'단어' 시트 처리 완료")
+
+    return sheets_dict
+
+
+def parse_listening_paragraphs(paragraphs, filename_base, current_unit):
+    """리스닝 스크립트(문단 리스트)를 문장별로 분할하여 데이터를 정제"""
+    try:
+        from deep_translator import GoogleTranslator
+        translator = GoogleTranslator(source='en', target='ko')
+    except ImportError:
+        st.error("deep-translator 라이브러리가 필요합니다. 'pip install deep-translator'를 실행해주세요.")
+        return []
+
+    # nltk sentence tokenizer 준비
+    try:
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt_tab', quiet=True)
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', quiet=True)
+
+    data = []
+    sentence_no = 1
+
+    for i, p_text in enumerate(paragraphs):
+        p_text = p_text.strip()
+        if not p_text:
+            continue
+
+        # Unit 정보 업데이트 (예: 'Unit 01. The Sun')
+        if p_text.lower().startswith("unit"):
+            current_unit = p_text
+            sentence_no = 1  # 단원별로 문장 번호 초기화
+            continue
+
+        # 대화 형식 파싱 (예: "Sally: Hello. How are you?")
+        # 화자가 단독으로 오는 경우 ("Sally:")
+        if p_text.endswith(":") and re.match(r"^[A-Za-z0-9\s\-]+:$", p_text):
+            sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+            data.append({
+                "A": filename_base,
+                "B": current_unit,
+                "C": sentence_no,
+                "D": p_text,
+                "E": p_text,  # 해석하지 않고 그대로 둠
+                "F": sound_path
+            })
+            sentence_no += 1
+        else:
+            # "Sally: Hello..." 같은 형식 판별
+            match = re.match(r"^([A-Za-z0-9\s\-]+:)(.*)", p_text)
+            if match:
+                speaker = match.group(1).strip()
+                body = match.group(2).strip()
+                sentences = nltk.sent_tokenize(body)
+                for sent in sentences:
+                    sent_text = f"{speaker} {sent}"
+                    try:
+                        meaning = translator.translate(sent_text)
+                    except:
+                        meaning = ""
+                    
+                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    data.append({
+                        "A": filename_base,
+                        "B": current_unit,
+                        "C": sentence_no,
+                        "D": sent_text,
+                        "E": meaning,
+                        "F": sound_path
+                    })
+                    sentence_no += 1
+            else:
+                # 일반 서술문
+                sentences = nltk.sent_tokenize(p_text)
+                for sent in sentences:
+                    try:
+                        meaning = translator.translate(sent)
+                    except:
+                        meaning = ""
+                    
+                    sound_path = f"{sanitize_filename(current_unit)}/{sanitize_filename(filename_base)}_{sentence_no}.mp3" if current_unit else f"Unassigned/{sanitize_filename(filename_base)}_{sentence_no}.mp3"
+                    data.append({
+                        "A": filename_base,
+                        "B": current_unit,
+                        "C": sentence_no,
+                        "D": sent,
+                        "E": meaning,
+                        "F": sound_path
+                    })
+                    sentence_no += 1
+
+        # 문단이 바뀔 때 공백 행 추가
+        if i < len(paragraphs) - 1:
+            data.append({
+                "A": filename_base,
+                "B": current_unit,
+                "C": sentence_no,
+                "D": "",
+                "E": "",
+                "F": ""
+            })
+            sentence_no += 1
+
+    return data
+
+
 def update_sound_paths(df, base_output_dir):
     """사운드파일 경로 업데이트: L열에 상대 경로 저장"""
     st.info("📂 사운드 파일 경로를 업데이트합니다...")
@@ -320,7 +482,15 @@ def generate_sounds(df, base_output_dir):
 st.set_page_config(page_title="영어 학습 자료 도구 세트", layout="wide")
 st.title("🎧 영어 학습 자료 처리 도구")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🔤 단어 파일 처리", "📚 리딩 파일 처리", "📑 리딩 스크립트 업로드", "✍️ 리딩 단원 스크립트 추가"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🔤 단어 파일 처리", 
+    "📚 리딩-해석추가", 
+    "📑 리딩 스크립트 업로드", 
+    "✍️ 리딩 단원 스크립트 추가",
+    "🎧 리스닝 스크립트 업로드",
+    "📊 리스닝 파일 처리",
+    "📝 리스닝 단원 스크립트 추가"
+])
 
 # ==========================================
 # TAB 1: 단어 파일 처리
@@ -726,5 +896,207 @@ with tab4:
                         use_container_width=True,
                         key="dl_manual"
                     )
+                except Exception as e:
+                    st.error(f"오류 발생: {e}")
+
+
+# ==========================================
+# TAB 5: 리스닝 스크립트 업로드
+# ==========================================
+with tab5:
+    st.markdown("""
+    워드(.docx) 파일을 업로드하면 대화 형식 및 문장을 분리하여 리스닝 엑셀 형식으로 시트를 만들어줍니다.  
+    - **Unit**으로 시작하는 문단은 단원명으로 인식합니다.
+    - 대화 형식(`Sally: Hello. How are you?`)은 화자 이름과 함께 문장별로 쪼개어 처리합니다.
+    - 한 명이 여러 문장을 말한 경우 각각의 문장이 분리됩니다.
+    - 문단이 바뀔 때는 D 열에 공백 행을 추가합니다. (C 열 문장번호는 유지)
+    - 영어 문장을 한글로 자동 번역하여 E 열에 추가합니다.
+    """)
+
+    uploaded_listen_docx = st.file_uploader("📁 리스닝 워드 파일 업로더 (.docx)", type=["docx"], key="listen_docx_uploader")
+
+    if uploaded_listen_docx is not None:
+        if st.button("▶ 리스닝 엑셀 파일로 변환 실행", type="primary", use_container_width=True, key="btn_listen_docx_convert"):
+            try:
+                from docx import Document
+                
+                doc = Document(uploaded_listen_docx)
+                filename_base = Path(uploaded_listen_docx.name).stem
+                
+                paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+                
+                with st.spinner("리스닝 워드 파일을 분석하고 번역하는 중..."):
+                    data = parse_listening_paragraphs(paragraphs, filename_base, "")
+                
+                if data:
+                    result_df = pd.DataFrame(data)
+                    result_df.columns = ["파일명", "Unit명", "문장번호", "영어문장", "한글해석", "사운드경로"]
+                    
+                    st.success("✅ 변환 완료!")
+                    st.dataframe(result_df)
+                    
+                    # 다운로드 버튼
+                    docx_output = io.BytesIO()
+                    with pd.ExcelWriter(docx_output, engine='openpyxl') as writer:
+                        result_df.to_excel(writer, index=False, sheet_name="본문")
+                    
+                    st.download_button(
+                        label="📥 변환된 리스닝 엑셀 파일 다운로드",
+                        data=docx_output.getvalue(),
+                        file_name=f"{filename_base}_listening_converted.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="dl_listen_docx"
+                    )
+                else:
+                    st.warning("⚠️ 추출된 텍스트 데이터가 없습니다.")
+                    
+            except Exception as e:
+                st.error(f"변환 중 오류 발생: {e}")
+                st.exception(e)
+
+
+# ==========================================
+# TAB 6: 리스닝 파일 처리
+# ==========================================
+with tab6:
+    st.markdown("""
+    리스닝 엑셀 파일을 업로드하세요.  
+    **D열**의 영어 문장을 읽어 **E열**이 비어있는 경우 한글로 해석하여 채워줍니다.  
+    단, `"Sally:"`와 같이 콜론으로 끝나는 화자 표시 텍스트는 번역하지 않고 그대로 유지합니다.
+    """)
+
+    # ── 템플릿 다운로드 기능 ──────────────────
+    st.write("### 📥 리스닝 파일 템플릿 다운로드")
+    
+    template_listen_main_cols = [
+        "LISTENING_BOOK_NM", "LISTENING_UNIT_NM", "LISTENING_SENTENCE_SEQ", 
+        "LISTENING_SENTENCE", "LISTENING_SETENCE_MEANING", "LISTENING_SENTENCE_SOUND_FILE"
+    ]
+    template_listen_voca_cols = [
+        "LISTENING_BOOK_NM", "LISTENING_UNIT_NM", 
+        "LISTENING_VOCA", "LISTENING_VOCA_MEANING", "LISTENING_VOCA_SOUND_FILE"
+    ]
+    template_listen_links_cols = [
+        "title", "link", "teacher_only"
+    ]
+    
+    df_listen_main_template = pd.DataFrame(columns=template_listen_main_cols)
+    df_listen_voca_template = pd.DataFrame(columns=template_listen_voca_cols)
+    df_listen_links_template = pd.DataFrame(columns=template_listen_links_cols)
+    
+    listen_template_buffer = io.BytesIO()
+    with pd.ExcelWriter(listen_template_buffer, engine='openpyxl') as writer:
+        df_listen_main_template.to_excel(writer, sheet_name='본문', index=False)
+        df_listen_voca_template.to_excel(writer, sheet_name='단어', index=False)
+        df_listen_links_template.to_excel(writer, sheet_name='links', index=False)
+    
+    st.download_button(
+        label="📄 리스닝 파일 템플릿(.xlsx) 다운로드",
+        data=listen_template_buffer.getvalue(),
+        file_name="listening_template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="btn_listen_template_download"
+    )
+
+    st.write("---")
+
+    uploaded_listening = st.file_uploader("📁 리스닝 파일 업로더 (.xlsx)", type=["xlsx"], key="listening_uploader")
+
+    if uploaded_listening is not None:
+        listening_filename = uploaded_listening.name
+
+        # 세션 상태에 리스닝 데이터프레임(딕셔너리) 저장
+        if 'listening_sheets' not in st.session_state or 'listening_loaded_file' not in st.session_state \
+                or st.session_state.listening_loaded_file != listening_filename:
+            st.session_state.listening_sheets = pd.read_excel(uploaded_listening, sheet_name=None, header=0)
+            st.session_state.listening_loaded_file = listening_filename
+            st.info(f"✅ '{listening_filename}' 파일(모든 시트)이 로드되었습니다.")
+
+        l_sheets = st.session_state.listening_sheets
+
+        st.write("### 📊 데이터 미리보기 (시트 선택)")
+        selected_l_sheet = st.selectbox("미리보기할 시트를 선택하세요:", list(l_sheets.keys()), key="l_sheet_selector")
+        st.dataframe(l_sheets[selected_l_sheet].tail(5))
+
+        st.write("---")
+
+        if st.button("▶ 모든 시트 해석/뜻 업데이트 실행", type="primary", use_container_width=True, key="btn_listening_process"):
+            with st.spinner("번역 작업을 수행하는 중입니다..."):
+                processed_l_sheets = process_listening_excel(st.session_state.listening_sheets.copy())
+                st.session_state.listening_sheets = processed_l_sheets
+            st.success("✅ 모든 시트의 업데이트가 완료되었습니다!")
+
+        # ── 다운로드 영역 ─────────────────────────
+        st.write("---")
+        st.write("### 📥 결과 엑셀 파일 다운로드")
+
+        l_output = io.BytesIO()
+        with pd.ExcelWriter(l_output, engine='openpyxl') as writer:
+            for sheet_name, sheet_df in st.session_state.listening_sheets.items():
+                sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        l_processed_data = l_output.getvalue()
+
+        l_save_filename = get_update_filename(listening_filename)
+
+        st.download_button(
+            label=f"💾 '{l_save_filename}' 다운로드",
+            data=l_processed_data,
+            file_name=l_save_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="dl_listening_processed"
+        )
+
+
+# ==========================================
+# TAB 7: 리스닝 단원 스크립트 추가 (수동 입력)
+# ==========================================
+with tab7:
+    st.markdown("""
+    교재 제목, 단원 제목, 그리고 대화 스크립트를 직접 입력하여 리스닝용 엑셀 파일로 변환합니다.
+    """)
+    
+    col1_l, col2_l = st.columns(2)
+    with col1_l:
+        manual_listen_book_nm = st.text_input("📚 교재 제목", placeholder="예: Middle School Listening 1", key="input_l_book_nm")
+    with col2_l:
+        manual_listen_unit_nm = st.text_input("📑 단원 제목", placeholder="예: Unit 1. Nice to Meet You", key="input_l_unit_nm")
+        
+    manual_listen_body = st.text_area("📝 본문 입력 (여러 줄)", height=350, placeholder="여기에 대화 내용을 붙여넣으세요...", key="input_l_body")
+
+    if st.button("▶ 리스닝 입력 완료 및 엑셀 생성", type="primary", use_container_width=True, key="btn_listen_manual_create"):
+        if not manual_listen_book_nm or not manual_listen_unit_nm or not manual_listen_body:
+            st.warning("⚠️ 교재 제목, 단원 제목, 본문을 모두 입력해주세요.")
+        else:
+            with st.spinner("처리 중입니다..."):
+                try:
+                    paragraphs = [p.strip() for p in manual_listen_body.split('\n') if p.strip()]
+                    
+                    manual_listen_data = parse_listening_paragraphs(paragraphs, manual_listen_book_nm, manual_listen_unit_nm)
+                    
+                    if manual_listen_data:
+                        manual_listen_df = pd.DataFrame(manual_listen_data)
+                        manual_listen_df.columns = ["파일명", "Unit명", "문장번호", "영어문장", "한글해석", "사운드경로"]
+                        
+                        st.success("✅ 변환이 완료되었습니다!")
+                        st.dataframe(manual_listen_df)
+                        
+                        # 다운로드
+                        ml_output = io.BytesIO()
+                        with pd.ExcelWriter(ml_output, engine='openpyxl') as writer:
+                            manual_listen_df.to_excel(writer, index=False, sheet_name="본문")
+                        
+                        st.download_button(
+                            label="📥 생성된 리스닝 엑셀 파일 다운로드",
+                            data=ml_output.getvalue(),
+                            file_name=f"{manual_listen_unit_nm}_listening_script.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="dl_listen_manual"
+                        )
+                    else:
+                        st.warning("⚠️ 처리할 텍스트 데이터가 생성되지 않았습니다.")
                 except Exception as e:
                     st.error(f"오류 발생: {e}")
