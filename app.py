@@ -7,6 +7,7 @@ import re
 import io
 from pathlib import Path
 import nltk
+import pydub
 
 # ────────────────────────────────────────────
 # 유틸리티 (수정 및 분석 영역)
@@ -623,14 +624,16 @@ def generate_sounds(df, base_output_dir):
 st.set_page_config(page_title="영어 학습 자료 도구 세트", layout="wide")
 st.title("🎧 영어 학습 자료 처리 도구")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🔤 단어 파일 처리", 
     "📚 리딩-해석추가", 
     "📑 리딩 스크립트 업로드", 
     "✍️ 리딩 단원 스크립트 추가",
     "🎧 리스닝 스크립트 업로드",
     "📊 리스닝 파일 처리",
-    "📝 리스닝 단원 스크립트 추가"
+    "📝 리스닝 단원 스크립트 추가",
+    "🔊 리스닝 사운드 생성",
+    "✂️ 리스닝 사운드 편집"
 ])
 
 # ==========================================
@@ -1355,3 +1358,286 @@ with tab7:
                         st.warning("⚠️ 처리할 텍스트 데이터가 생성되지 않았습니다.")
                 except Exception as e:
                     st.error(f"오류 발생: {e}")
+
+
+# ==========================================
+# TAB 8: 리스닝 사운드 생성 (TTS)
+# ==========================================
+with tab8:
+    st.markdown("""
+    업로드한 엑셀 파일의 **D열(영어문장)**을 읽어 TTS(gTTS)를 통해 MP3 사운드 파일을 생성합니다.  
+    - **화자 정보**(예: `Sally: Hello` 에서 `Sally:`)는 사운드로 변환하지 않고 문장만 사운드로 만듭니다.
+    - 생성된 파일은 **[지정된 경로]/[A열 교재명]/[B열 단원명]/[C열 파일명].mp3** 구조로 저장됩니다.
+    """)
+
+    uploaded_l_sound_excel = st.file_uploader("📁 리스닝 엑셀 파일 업로드 (.xlsx)", type=["xlsx"], key="listening_sound_excel_uploader")
+    base_output_dir_t8 = st.text_input("📂 사운드 저장 기본 경로", value="output_sounds", key="l_sound_gen_base_dir")
+
+    if uploaded_l_sound_excel is not None:
+        sheets_t8 = pd.read_excel(uploaded_l_sound_excel, sheet_name=None, header=0)
+        sheet_names_t8 = list(sheets_t8.keys())
+        selected_sheet_t8 = st.selectbox(
+            "파싱할 시트를 선택하세요:", 
+            sheet_names_t8, 
+            index=0 if '본문' not in sheet_names_t8 else sheet_names_t8.index('본문'),
+            key="sheet_selector_t8"
+        )
+        
+        df_t8 = sheets_t8[selected_sheet_t8]
+        st.dataframe(df_t8.head(5))
+
+        if st.button("▶ TTS 사운드 파일 생성 실행", type="primary", use_container_width=True, key="btn_listening_sound_generate"):
+            if len(df_t8.columns) < 4:
+                st.error("⚠️ 엑셀 파일에 적어도 4개의 열(A:교재명, B:단원명, C:파일명, D:영어문장)이 존재해야 합니다.")
+            else:
+                with st.spinner("TTS 사운드 파일을 생성하는 중..."):
+                    try:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        total_rows = len(df_t8)
+                        generated_count = 0
+                        skipped_count = 0
+
+                        for index, row in df_t8.iterrows():
+                            # 데이터 추출
+                            val_a = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ""
+                            val_b = str(row.iloc[1]).strip() if not pd.isna(row.iloc[1]) else "Unassigned"
+                            val_c = str(row.iloc[2]).strip() if not pd.isna(row.iloc[2]) else ""
+                            val_d = str(row.iloc[3]).strip() if not pd.isna(row.iloc[3]) else ""
+
+                            # 유효성 검사
+                            if not val_d or not val_c:
+                                skipped_count += 1
+                                continue
+
+                            # 화자명 제거 처리 ("Anne: Hello" -> "Hello")
+                            match = re.match(r"^([A-Za-z0-9\s\-]+:)\s*(.*)", val_d)
+                            if match:
+                                text_to_speak = match.group(2).strip()
+                            else:
+                                text_to_speak = val_d
+
+                            # 화자명만 단독으로 있거나 텍스트가 없는 경우 스킵
+                            if not text_to_speak:
+                                skipped_count += 1
+                                continue
+
+                            # 경로 설정
+                            target_dir = os.path.join(
+                                base_output_dir_t8, 
+                                sanitize_filename(val_a) if val_a else "Unassigned", 
+                                sanitize_filename(val_b)
+                            )
+                            filename = sanitize_filename(val_c) + ".mp3"
+                            file_path = os.path.join(target_dir, filename)
+
+                            # 저장 폴더 생성 및 TTS 저장
+                            if not os.path.exists(target_dir):
+                                os.makedirs(target_dir, exist_ok=True)
+
+                            tts = gTTS(text=text_to_speak, lang='en')
+                            tts.save(file_path)
+                            generated_count += 1
+
+                            progress_bar.progress((index + 1) / total_rows)
+                            status_text.text(f"진행 중: {index + 1}/{total_rows} (생성: {generated_count}, 건너뜀: {skipped_count})")
+
+                        st.success(f"🎉 TTS 사운드 파일 생성 완료! (생성됨: {generated_count}개, 건너뜀: {skipped_count}개)")
+                        st.info(f"🔊 사운드 파일 저장 위치: `{os.path.abspath(base_output_dir_t8)}`")
+                    except Exception as e:
+                        st.error(f"오류 발생: {e}")
+
+
+# ==========================================
+# TAB 9: 리스닝 사운드 편집 (Audio Slicing)
+# ==========================================
+with tab9:
+    st.markdown("""
+    엑셀 파일과 통 오디오 파일(.mp3)을 업로드하여 각 문장별로 사운드를 끊어냅니다.  
+    - 재생하면서 문장의 **시작 시간**과 **종료 시간**을 입력하세요.
+    - **[미리듣기]** 버튼을 통해 잘라낼 구간의 소리를 미리 들어볼 수 있습니다.
+    - 잘라낸 사운드는 **[지정된 경로]/[A열 교재명]/[B열 단원명]/[C열 파일명].mp3**로 저장됩니다. (동일 파일 존재 시 덮어씀)
+    """)
+
+    col_e1, col_e2 = st.columns(2)
+    with col_e1:
+        uploaded_edit_excel = st.file_uploader("📁 리스닝 엑셀 파일 업로드 (.xlsx)", type=["xlsx"], key="listening_edit_excel_uploader")
+    with col_e2:
+        uploaded_edit_audio = st.file_uploader("🎵 원본 오디오 파일 업로드 (.mp3)", type=["mp3"], key="listening_edit_audio_uploader")
+
+    base_output_dir_t9 = st.text_input("📂 사운드 편집 저장 기본 경로", value="output_sounds", key="l_sound_edit_base_dir")
+
+    # 엑셀과 오디오가 모두 올라왔을 때 활성화
+    if uploaded_edit_excel is not None and uploaded_edit_audio is not None:
+        try:
+            # 1. 엑셀 로드
+            sheets_t9 = pd.read_excel(uploaded_edit_excel, sheet_name=None, header=0)
+            sheet_names_t9 = list(sheets_t9.keys())
+            selected_sheet_t9 = st.selectbox(
+                "편집할 시트를 선택하세요:", 
+                sheet_names_t9, 
+                index=0 if '본문' not in sheet_names_t9 else sheet_names_t9.index('본문'),
+                key="sheet_selector_t9"
+            )
+            df_t9 = sheets_t9[selected_sheet_t9]
+
+            # 2. 오디오 로드 (pydub 사용)
+            with st.spinner("오디오 파일을 불러오는 중..."):
+                audio_bytes = uploaded_edit_audio.read()
+                audio_segment = pydub.AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+                duration_sec = len(audio_segment) / 1000.0
+                
+            st.success(f"🎵 원본 오디오가 로드되었습니다. (총 길이: {duration_sec:.2f}초)")
+            
+            # 원본 오디오 재생용 플레이어 
+            st.write("### 🎧 원본 오디오 전체 재생")
+            st.audio(audio_bytes, format="audio/mp3")
+            
+            # 3. 편집 인터페이스 설계
+            st.write("---")
+            st.write("### ✂️ 문장별 시작/종료점 설정")
+
+            if len(df_t9.columns) < 4:
+                st.error("⚠️ 엑셀 파일에 적어도 4개의 열(A:교재명, B:단원명, C:파일명, D:영어문장)이 존재해야 합니다.")
+            else:
+                # 대량의 문장이 올라왔을 때 페이지가 너무 길어지는 문제를 방지하기 위해 10개씩 페이지네이션 지원
+                items_per_page = 10
+                total_items = len(df_t9)
+                total_pages = (total_items - 1) // items_per_page + 1
+
+                col_page1, col_page2 = st.columns([1, 4])
+                with col_page1:
+                    page_num = st.number_input("페이지 번호", min_value=1, max_value=total_pages, value=1, step=1, key="l_edit_page_num")
+                with col_page2:
+                    st.write(f"총 {total_items}개의 문장이 있습니다. (페이지: {page_num} / {total_pages})")
+
+                start_idx = (page_num - 1) * items_per_page
+                end_idx = min(start_idx + items_per_page, total_items)
+                
+                # 세션 상태에 시작/종료 값 초기화
+                if "slices_state" not in st.session_state:
+                    st.session_state.slices_state = {}
+
+                st.write("")
+                # 페이지 범위의 데이터만 표시
+                for idx in range(start_idx, end_idx):
+                    row = df_t9.iloc[idx]
+                    val_a = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ""
+                    val_b = str(row.iloc[1]).strip() if not pd.isna(row.iloc[1]) else "Unassigned"
+                    val_c = str(row.iloc[2]).strip() if not pd.isna(row.iloc[2]) else ""
+                    val_d = str(row.iloc[3]).strip() if not pd.isna(row.iloc[3]) else ""
+
+                    # 빈 줄은 스킵
+                    if not val_d and not val_c:
+                        continue
+
+                    # 세션 상태값 가져오기/초기화
+                    if idx not in st.session_state.slices_state:
+                        st.session_state.slices_state[idx] = {"start": 0.0, "end": 0.0}
+
+                    with st.container():
+                        st.markdown(f"**[{idx + 1}] {val_d}** (저장 파일명: `{val_c}.mp3`) - {val_a} / {val_b}")
+                        
+                        col_num1, col_num2, col_listen = st.columns([2, 2, 2])
+                        with col_num1:
+                            start_val = st.number_input(
+                                f"시작(초) #{idx+1}", 
+                                min_value=0.0, 
+                                max_value=duration_sec, 
+                                value=st.session_state.slices_state[idx]["start"], 
+                                step=0.1, 
+                                format="%.2f",
+                                key=f"start_in_{idx}"
+                            )
+                            st.session_state.slices_state[idx]["start"] = start_val
+                        with col_num2:
+                            end_val = st.number_input(
+                                f"종료(초) #{idx+1}", 
+                                min_value=0.0, 
+                                max_value=duration_sec, 
+                                value=st.session_state.slices_state[idx]["end"] if st.session_state.slices_state[idx]["end"] > 0 else 0.0, 
+                                step=0.1, 
+                                format="%.2f",
+                                key=f"end_in_{idx}"
+                            )
+                            st.session_state.slices_state[idx]["end"] = end_val
+                        
+                        with col_listen:
+                            st.write("🔬 미리듣기")
+                            # 시작 시각이 종료 시각보다 작은 유효한 입력일 때만 미리듣기 노출
+                            if start_val < end_val:
+                                if st.button(f"🔊 재생 #{idx+1}", key=f"btn_preview_{idx}", use_container_width=True):
+                                    try:
+                                        start_ms = int(start_val * 1000)
+                                        end_ms = int(end_val * 1000)
+                                        sliced_seg = audio_segment[start_ms:end_ms]
+                                        
+                                        preview_buf = io.BytesIO()
+                                        sliced_seg.export(preview_buf, format="mp3")
+                                        st.audio(preview_buf.getvalue(), format="audio/mp3")
+                                    except Exception as ex_slice:
+                                        st.error(f"미리듣기 생성 에러: {ex_slice}")
+                            else:
+                                st.caption("시작 < 종료여야 재생 가능")
+                                
+                    st.write("---")
+
+                # 일괄 처리 영역
+                st.write("### 📥 모든 문장 사운드 잘라내기 실행")
+                st.write("페이지에 관계없이 **시작 및 종료 시간이 올바르게 입력된(시작 < 종료)** 모든 행의 오디오를 잘라내어 저장합니다.")
+                
+                if st.button("▶ 모든 사운드 끊어내기 및 저장 실행", type="primary", use_container_width=True, key="btn_slice_all_run"):
+                    with st.spinner("사운드를 잘라내어 저장 폴더에 기록하는 중..."):
+                        try:
+                            saved_count = 0
+                            progress_bar_all = st.progress(0)
+                            status_text_all = st.empty()
+                            total_rows_t9 = len(df_t9)
+
+                            for index, row in df_t9.iterrows():
+                                val_a = str(row.iloc[0]).strip() if not pd.isna(row.iloc[0]) else ""
+                                val_b = str(row.iloc[1]).strip() if not pd.isna(row.iloc[1]) else "Unassigned"
+                                val_c = str(row.iloc[2]).strip() if not pd.isna(row.iloc[2]) else ""
+                                val_d = str(row.iloc[3]).strip() if not pd.isna(row.iloc[3]) else ""
+
+                                if not val_c or not val_d:
+                                    continue
+
+                                # 세션 상태에서 시작/종료 값 획득
+                                slice_info = st.session_state.slices_state.get(index, {"start": 0.0, "end": 0.0})
+                                s_val = slice_info["start"]
+                                e_val = slice_info["end"]
+
+                                if s_val >= e_val or e_val <= 0:
+                                    continue # 유효하지 않은 구간은 건너뜀
+
+                                # 저장 경로 빌드
+                                target_dir = os.path.join(
+                                    base_output_dir_t9, 
+                                    sanitize_filename(val_a) if val_a else "Unassigned", 
+                                    sanitize_filename(val_b)
+                                )
+                                filename = sanitize_filename(val_c) + ".mp3"
+                                file_path = os.path.join(target_dir, filename)
+
+                                if not os.path.exists(target_dir):
+                                    os.makedirs(target_dir, exist_ok=True)
+
+                                # pydub 자르기 및 저장
+                                s_ms = int(s_val * 1000)
+                                e_ms = int(e_val * 1000)
+                                cut_segment = audio_segment[s_ms:e_ms]
+                                
+                                # 저장 (덮어쓰기 지원)
+                                cut_segment.export(file_path, format="mp3")
+                                saved_count += 1
+
+                                progress_bar_all.progress((index + 1) / total_rows_t9)
+                                status_text_all.text(f"저장 중: {index + 1}/{total_rows_t9} (저장됨: {saved_count}개)")
+
+                            st.success(f"🎉 사운드 끊어내기 및 저장 완료! 총 {saved_count}개의 파일이 생성 및 기록되었습니다.")
+                            st.info(f"📂 저장 위치: `{os.path.abspath(base_output_dir_t9)}`")
+                        except Exception as e_run:
+                            st.error(f"오디오 슬라이싱 실행 중 에러 발생: {e_run}")
+        except Exception as e_init:
+            st.error(f"파일 로드 및 전처리 오류: {e_init}")

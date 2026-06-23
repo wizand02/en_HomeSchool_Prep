@@ -6,3 +6,4 @@ eng-to-ipa
 deep-translator
 nltk
 python-docx
+pydub
