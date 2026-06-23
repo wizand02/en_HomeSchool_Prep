@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+        margin: 0;
+        padding: 5px;
+        background-color: #0e1117;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #fafafa;
+        overflow: hidden;
+    }
+    .wave-container {
+        background: #00162b;
+        border: 1px solid #002d54;
+        border-radius: 8px;
+        padding: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+    }
+    #waveform {
+        background: #000f1f;
+        border-radius: 6px;
+        padding: 5px;
+        border: 1px solid #002447;
+    }
+    .control-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #002d54;
+    }
+    .btn-group {
+        display: flex;
+        gap: 6px;
+    }
+    .btn {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 12px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.2s ease;
+    }
+    .btn-primary {
+        background: linear-gradient(135deg, #ff4b4b 0%, #ff7575 100%);
+        color: white;
+    }
+    .btn-secondary {
+        background: #1e293b;
+        color: #94a3b8;
+        border: 1px solid #334155;
+    }
+    .btn-secondary.active-green {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        color: white !important;
+        border: 1px solid #047857 !important;
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+    }
+    .btn:hover:not(:disabled) {
+        opacity: 0.9;
+    }
+    .btn:active:not(:disabled) {
+        opacity: 0.8;
+    }
+    .btn:disabled {
+        background: #0f172a;
+        color: #475569;
+        border: 1px solid #1e293b;
+        cursor: not-allowed;
+    }
+    .info-display {
+        font-size: 13px;
+        color: #94a3b8;
+        background: #001c38;
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #002d54;
+        min-width: 120px;
+        text-align: center;
+    }
+    .time-span {
+        font-weight: bold;
+        color: #00ffd2;
+    }
+    .slider-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #94a3b8;
+        font-size: 12px;
+    }
+    .slider-container input[type="range"] {
+        accent-color: #00d2ff;
+        cursor: pointer;
+    }
+    .toast {
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        background: #10b981;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 9999;
+    }
+    .toast.show {
+        opacity: 1;
+    }
+    .wavesurfer-region {
+        border: 1px dashed rgba(0, 210, 255, 0.4) !important;
+        background-color: rgba(0, 150, 255, 0.15) !important;
+    }
+    .wavesurfer-handle {
+        width: 6px !important;
+        background-color: #00d2ff !important;
+        opacity: 1 !important;
+        cursor: col-resize;
+    }
+  </style>
+</head>
+<body>
+  <div class="wave-container">
+    <div id="waveform"></div>
+    <div class="control-bar">
+      <div class="btn-group">
+        <button id="playBtn" class="btn btn-primary"><i class="fa-solid fa-play"></i> 재생 / 일시정지</button>
+      </div>
+      <div class="slider-container">
+        <i class="fa-solid fa-magnifying-glass-minus"></i>
+        <input type="range" id="zoomSlider" min="10" max="300" value="10" style="width: 100px;">
+        <i class="fa-solid fa-magnifying-glass-plus"></i>
+      </div>
+      <div class="info-display">
+        선택 구간: <span id="region-time" class="time-span">없음 (드래그하세요)</span>
+      </div>
+      <div class="btn-group">
+        <button id="copyStartBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 시작 복사</button>
+        <button id="copyEndBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 종료 복사</button>
+        <button id="copyBothBtn" class="btn btn-secondary" disabled><i class="fa-solid fa-copy"></i> 모두 복사</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast">복사되었습니다!</div>
+
+  <script src="https://unpkg.com/wavesurfer.js@7"></script>
+  <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+  <script>
+    let ws = null;
+    let wsRegions = null;
+    let activeRegion = null;
+    let currentAudioBase64 = "";
+    let isInitialized = false;
+    let debounceTimer = null;
+
+    // Streamlit 통신용 함수
+    function sendValueToStreamlit(data) {
+        window.parent.postMessage({
+            type: "streamlit:setComponentValue",
+            value: data
+        }, "*");
+    }
+
+    function setFrameHeight(height) {
+        window.parent.postMessage({
+            type: "streamlit:setFrameHeight",
+            height: height
+        }, "*");
+    }
+
+    // 초기화 신호 전송
+    window.parent.postMessage({
+        type: "streamlit:componentReady",
+        apiVersion: 1
+    }, "*");
+
+    // Streamlit으로부터 전달된 데이터 처리
+    window.addEventListener("message", (event) => {
+        if (event.data.type === "streamlit:render") {
+            const args = event.data.args;
+            if (!args || !args.audio_base64) return;
+
+            // 오디오 데이터가 변경되었을 때만 Wavesurfer 재초기화
+            if (currentAudioBase64 !== args.audio_base64) {
+                currentAudioBase64 = args.audio_base64;
+                initWaveSurfer(args.audio_base64, args.initial_start, args.initial_end);
+            } else {
+                // 영역 정보만 변경되었을 때
+                if (args.initial_start !== undefined && args.initial_end !== undefined) {
+                    updateRegionExternally(args.initial_start, args.initial_end);
+                }
+            }
+        }
+    });
+
+    function initWaveSurfer(base64Data, initStart, initEnd) {
+        if (ws) {
+            ws.destroy();
+        }
+        
+        isInitialized = false;
+        const audioUrl = "data:audio/mp3;base64," + base64Data;
+        
+        ws = WaveSurfer.create({
+            container: '#waveform',
+            waveColor: '#00e1b5',
+            progressColor: '#00d2ff',
+            url: audioUrl,
+            height: 100,
+            responsive: true
+        });
+
+        wsRegions = ws.registerPlugin(WaveSurfer.Regions.create());
+
+        ws.on('ready', () => {
+            if (isInitialized) return;
+            isInitialized = true;
+            
+            const duration = ws.getDuration();
+            const start = (initStart !== undefined && initStart !== null && initStart >= 0) ? initStart : 0;
+            const end = (initEnd !== undefined && initEnd !== null && initEnd > 0) ? initEnd : duration;
+
+            activeRegion = wsRegions.addRegion({
+                start: start,
+                end: end,
+                color: 'rgba(255, 75, 75, 0.25)',
+                drag: true,
+                resize: true
+            });
+
+            updateUI(activeRegion);
+            
+            wsRegions.enableDragSelection({
+                color: 'rgba(255, 75, 75, 0.25)'
+            });
+
+            setFrameHeight(document.body.scrollHeight + 10);
+        });
+
+        // 재생/일시정지
+        document.getElementById('playBtn').onclick = () => {
+            if (activeRegion && !ws.isPlaying()) {
+                const curr = ws.getCurrentTime();
+                if (curr < activeRegion.start || curr > activeRegion.end) {
+                    ws.setTime(activeRegion.start);
+                }
+            }
+            ws.playPause();
+        };
+
+        // 줌
+        document.getElementById('zoomSlider').oninput = (e) => {
+            ws.zoom(Number(e.target.value));
+        };
+
+        // 반복 재생
+        ws.on('timeupdate', () => {
+            if (activeRegion && ws.isPlaying()) {
+                const curr = ws.getCurrentTime();
+                if (curr >= activeRegion.end || curr < activeRegion.start) {
+                    ws.setTime(activeRegion.start);
+                }
+            }
+        });
+
+        // 영역 생성/변경 감지
+        wsRegions.on('region-created', (region) => {
+            wsRegions.getRegions().forEach(r => {
+                if (r !== region) r.destroy();
+            });
+            activeRegion = region;
+            updateUI(region);
+            sendRegionDataDebounced(region);
+        });
+
+        wsRegions.on('region-updated', (region) => {
+            activeRegion = region;
+            updateUI(region);
+            
+            if (ws.isPlaying()) {
+                const curr = ws.getCurrentTime();
+                if (curr < region.start || curr > region.end) {
+                    ws.setTime(region.start);
+                }
+            }
+            sendRegionDataDebounced(region);
+        });
+    }
+
+    function updateRegionExternally(start, end) {
+        if (!ws || !wsRegions) return;
+        
+        if (activeRegion) {
+            if (Math.abs(activeRegion.start - start) > 0.05 || Math.abs(activeRegion.end - end) > 0.05) {
+                activeRegion.update({ start: start, end: end });
+                updateUI(activeRegion);
+            }
+        } else {
+            activeRegion = wsRegions.addRegion({
+                start: start,
+                end: end,
+                color: 'rgba(255, 75, 75, 0.25)',
+                drag: true,
+                resize: true
+            });
+            updateUI(activeRegion);
+        }
+    }
+
+    function updateUI(region) {
+        const start = region.start.toFixed(2);
+        const end = region.end.toFixed(2);
+        
+        document.getElementById('region-time').innerHTML = `<span class="time-span">${start}s ~ ${end}s</span>`;
+        
+        const btnStart = document.getElementById('copyStartBtn');
+        const btnEnd = document.getElementById('copyEndBtn');
+        const btnBoth = document.getElementById('copyBothBtn');
+        
+        btnStart.disabled = false;
+        btnEnd.disabled = false;
+        btnBoth.disabled = false;
+        
+        btnStart.classList.add('active-green');
+        btnEnd.classList.add('active-green');
+        btnBoth.classList.add('active-green');
+
+        btnStart.onclick = () => copyText(start, '시작 시간', false);
+        btnEnd.onclick = () => copyText(end, '종료 시간', false);
+        btnBoth.onclick = () => copyText(start + ', ' + end, '시작 및 종료 시간', true);
+    }
+
+    function sendRegionDataDebounced(region) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            sendValueToStreamlit({
+                start: parseFloat(region.start.toFixed(2)),
+                end: parseFloat(region.end.toFixed(2)),
+                action: 'region_change',
+                timestamp: Date.now()
+            });
+        }, 300);
+    }
+
+    function copyText(text, type, storeForPaste) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`${type} 복사 완료: ${text}`);
+                if (storeForPaste) {
+                    sendValueToStreamlit({
+                        start: parseFloat(text.split(',')[0].trim()),
+                        end: parseFloat(text.split(',')[1].trim()),
+                        action: 'copy_both',
+                        timestamp: Date.now()
+                    });
+                }
+            }).catch(() => { fallbackCopy(text, type, storeForPaste); });
+        } else {
+            fallbackCopy(text, type, storeForPaste);
+        }
+    }
+
+    function fallbackCopy(text, type, storeForPaste) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showToast(`${type} 복사 완료: ${text}`);
+                if (storeForPaste) {
+                    sendValueToStreamlit({
+                        start: parseFloat(text.split(',')[0].trim()),
+                        end: parseFloat(text.split(',')[1].trim()),
+                        action: 'copy_both',
+                        timestamp: Date.now()
+                    });
+                }
+            } else {
+                alert('복사 실패');
+            }
+        } catch (err) {
+            alert('복사 실패: ' + err);
+        }
+        document.body.removeChild(textArea);
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.classList.add('show');
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 2000);
+    }
+  </script>
+</body>
+</html>

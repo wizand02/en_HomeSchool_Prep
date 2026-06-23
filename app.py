@@ -647,216 +647,7 @@ def generate_sounds(df, base_output_dir):
 st.set_page_config(page_title="영어 학습 자료 도구 세트", layout="wide")
 st.title("🎧 영어 학습 자료 처리 도구")
 
-# CORS 우회를 위한 부모 창 리스너 주입 (Base64 안전 인코딩 방식)
-import base64
-
-parent_js_code = """
-console.log('Streamlit CORS Bridge Script Running (Base64 version)');
-
-// 최신 영역 정보를 부모 전역에 보관 (CORS 격리 우회용)
-window.latestStart = null;
-window.latestEnd = null;
-
-// 1. 인풋창 락 주기적 감시 및 처리 (부모 창 컨텍스트이므로 보안 에러 없음)
-function lockInputs() {
-    try {
-        const labels = document.querySelectorAll('label');
-        for (let label of labels) {
-            const text = label.innerText.trim();
-            if (text.startsWith('시작(초) #') || text.startsWith('종료(초) #')) {
-                const htmlFor = label.getAttribute('for');
-                const parentContainer = label.closest('[data-testid="stNumberInput"]');
-                const input = htmlFor ? document.getElementById(htmlFor) : (parentContainer ? parentContainer.querySelector('input[type="number"]') : null);
-                if (input && !input.readOnly && document.activeElement !== input) {
-                    input.readOnly = true;
-                    input.style.pointerEvents = 'none';
-                    input.style.backgroundColor = '#161a24';
-                    input.style.color = '#a3a8b4';
-                }
-            }
-        }
-    } catch(e) {}
-}
-setInterval(lockInputs, 500);
-
-// 공통 인풋 갱신 유틸리티 함수 (동기/비동기 흐름 제어)
-function setInputValue(labelText, val, callback) {
-    const labels = document.querySelectorAll('label');
-    let targetInput = null;
-    for (let label of labels) {
-        if (label.innerText.trim() === labelText) {
-            const htmlFor = label.getAttribute('for');
-            const parentContainer = label.closest('[data-testid="stNumberInput"]');
-            targetInput = htmlFor ? document.getElementById(htmlFor) : (parentContainer ? parentContainer.querySelector('input[type="number"]') : null);
-            break;
-        }
-    }
-    
-    if (targetInput) {
-        targetInput.readOnly = false;
-        targetInput.style.pointerEvents = 'auto';
-        targetInput.focus();
-        
-        const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
-        const prototype = Object.getPrototypeOf(targetInput);
-        const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-        const setter = valueSetter || prototypeValueSetter;
-        
-        if (setter) {
-            setter.call(targetInput, val);
-        } else {
-            targetInput.value = val;
-        }
-        
-        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-        targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        setTimeout(() => {
-            const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-            const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-            targetInput.dispatchEvent(keyDown);
-            targetInput.dispatchEvent(keyUp);
-            
-            setTimeout(() => {
-                targetInput.blur();
-                targetInput.readOnly = true;
-                targetInput.style.pointerEvents = 'none';
-                if (callback) callback();
-            }, 50);
-        }, 50);
-    } else {
-        if (callback) callback();
-    }
-}
-
-// 2. 메시지 수신 리스너 등록
-window.addEventListener('message', (event) => {
-    const data = event.data;
-    if (!data) return;
-    
-    // 2-A. Wavesurfer 영역 변경 사항 수신 및 캐싱
-    if (data.type === 'WAVEFORM_REGION_UPDATE') {
-        window.latestStart = data.start;
-        window.latestEnd = data.end;
-    }
-    
-    // 2-B. SET 버튼 클릭 시 최신 영역 정보를 인풋에 세팅 요청 처리
-    if (data.type === 'SET_INPUT_VALUE_FROM_LATEST') {
-        const idx = data.idx;
-        const startVal = window.latestStart;
-        const endVal = window.latestEnd;
-        
-        if (startVal === null || startVal === undefined || startVal === "" || endVal === null || endVal === undefined || endVal === "") {
-            alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
-            return;
-        }
-        
-        // 순차 비동기 갱신
-        setInputValue('시작(초) #' + (idx + 1), startVal, () => {
-            setTimeout(() => {
-                setInputValue('종료(초) #' + (idx + 1), endVal, null);
-            }, 200);
-        });
-    }
-
-    // 2-C. PASTE 버튼 클릭 시 지정 값을 인풋에 세팅 요청 처리
-    if (data.type === 'SET_INPUT_VALUE_DIRECT') {
-        const idx = data.idx;
-        const startVal = data.start;
-        const endVal = data.end;
-        
-        setInputValue('시작(초) #' + (idx + 1), startVal, () => {
-            setTimeout(() => {
-                setInputValue('종료(초) #' + (idx + 1), endVal, null);
-            }, 200);
-        });
-    }
-    
-    // 2-D. 클립보드 복사 요청 처리
-    if (data.type === 'COPY_CLIPBOARD') {
-        const text = data.text;
-        // 부모 전역에 마지막 복사 텍스트 보관 (PASTE 릴레이용)
-        window.latestClipboard = text;
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).catch(err => {
-                console.error('Clipboard copy fail:', err);
-            });
-        } else {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.position = 'fixed';
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textArea);
-        }
-    }
-
-    // 2-E. PASTE 버튼 클릭 시 부모에 저장된 클립보드 텍스트로 인풋 갱신
-    if (data.type === 'PASTE_FROM_CLIPBOARD') {
-        const idx = data.idx;
-        const clipText = window.latestClipboard;
-        if (!clipText) {
-            alert('붙여넣을 값이 없습니다. 먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
-            return;
-        }
-        const parts = clipText.split(',');
-        if (parts.length === 2) {
-            const startVal = parseFloat(parts[0].trim());
-            const endVal = parseFloat(parts[1].trim());
-            if (!isNaN(startVal) && !isNaN(endVal)) {
-                setInputValue('시작(초) #' + (idx + 1), startVal.toFixed(2), () => {
-                    setTimeout(() => {
-                        setInputValue('종료(초) #' + (idx + 1), endVal.toFixed(2), null);
-                    }, 200);
-                });
-            } else {
-                alert('시간 형식이 올바르지 않습니다.');
-            }
-        } else {
-            alert('붙여넣을 데이터 형식이 올바르지 않습니다. (예: 1.25, 4.80)\n먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
-        }
-    }
-});
-"""
-
-encoded_js = base64.b64encode(parent_js_code.encode('utf-8')).decode('utf-8')
-inject_js = f'<img src="x" onerror="if(!window.hasStreamlitListener){{window.hasStreamlitListener=true; eval(atob(\'{encoded_js}\'));}}" style="display:none;">'
-st.markdown(inject_js, unsafe_allow_html=True)
-
-# allow-same-origin 샌드박스를 이용한 부모 DOM 직접 접근 릴레이
-# inject_js(img onerror)가 CSP에 차단될 경우에도 인풋 잠금이 동작하도록 보완
-relay_html = """
-<script>
-(function() {
-    var p = window.parent;
-    if (p.__wfLockActive) return;
-    p.__wfLockActive = true;
-    p.setInterval(function() {
-        try {
-            var labels = p.document.querySelectorAll('label');
-            for (var i = 0; i < labels.length; i++) {
-                var t = labels[i].innerText.trim();
-                if (t.startsWith('시작(초) #') || t.startsWith('종료(초) #')) {
-                    var hf = labels[i].getAttribute('for');
-                    var pc = labels[i].closest('[data-testid="stNumberInput"]');
-                    var inp = hf ? p.document.getElementById(hf) :
-                        (pc ? pc.querySelector('input[type="number"]') : null);
-                    if (inp && !inp.readOnly && p.document.activeElement !== inp) {
-                        inp.readOnly = true;
-                        inp.style.pointerEvents = 'none';
-                        inp.style.backgroundColor = '#161a24';
-                        inp.style.color = '#a3a8b4';
-                    }
-                }
-            }
-        } catch(e) {}
-    }, 500);
-})();
-</script>
-"""
-st.components.v1.html(relay_html, height=1)
+# CORS 우회를 위한 구버전 스크립트 제거 (보안 이슈 해결을 위해 Native 및 Component 방식으로 전환)
 
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
@@ -1697,149 +1488,7 @@ with tab8:
 # TAB 9: 리스닝 사운드 편집 (Audio Slicing)
 # ==========================================
 with tab9:
-    def rendering_control_buttons(idx):
-        html_code = f"""
-        <style>
-            html, body {{
-                margin: 0;
-                padding: 0;
-                overflow: hidden;
-                background-color: transparent;
-                height: 100%;
-            }}
-            .btn-wrapper {{
-                display: flex;
-                gap: 6px;
-                margin-top: 28px;
-                height: 38px;
-                width: 100%;
-                box-sizing: border-box;
-            }}
-            .action-btn {{
-                flex: 1;
-                padding: 0 4px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 11px;
-                font-weight: bold;
-                color: white;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                transition: opacity 0.15s, box-shadow 0.15s;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                height: 100%;
-                box-sizing: border-box;
-                outline: none;
-            }}
-            .btn-set {{
-                background: linear-gradient(135deg, #00d2ff 0%, #00a2ff 100%);
-            }}
-            .btn-paste {{
-                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            }}
-            .action-btn:hover {{
-                opacity: 0.85;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            }}
-            .action-btn:active {{
-                opacity: 0.7;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-            }}
-        </style>
-        <div class="btn-wrapper">
-            <button id="setBtn_{idx}" class="action-btn btn-set">⚙️ SET</button>
-            <button id="pasteBtn_{idx}" class="action-btn btn-paste">📋 PASTE</button>
-        </div>
-
-        <script>
-        // allow-same-origin 샌드박스: window.parent.document 직접 접근으로 Streamlit 인풋 제어
-        function setInputValue(labelText, val, callback) {{
-            try {{
-                var doc = window.parent.document;
-                var labels = doc.querySelectorAll('label');
-                var targetInput = null;
-                for (var i = 0; i < labels.length; i++) {{
-                    if (labels[i].innerText.trim() === labelText) {{
-                        var hf = labels[i].getAttribute('for');
-                        var pc = labels[i].closest('[data-testid="stNumberInput"]');
-                        targetInput = hf ? doc.getElementById(hf) :
-                            (pc ? pc.querySelector('input[type="number"]') : null);
-                        break;
-                    }}
-                }}
-                if (targetInput) {{
-                    targetInput.readOnly = false;
-                    targetInput.style.pointerEvents = 'auto';
-                    targetInput.focus();
-                    var proto = Object.getPrototypeOf(targetInput);
-                    var desc = Object.getOwnPropertyDescriptor(proto, 'value');
-                    var setter = desc && desc.set;
-                    if (setter) setter.call(targetInput, val);
-                    else targetInput.value = val;
-                    targetInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    targetInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    setTimeout(function() {{
-                        targetInput.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', keyCode: 13, bubbles: true }}));
-                        targetInput.dispatchEvent(new KeyboardEvent('keyup', {{ key: 'Enter', keyCode: 13, bubbles: true }}));
-                        setTimeout(function() {{
-                            targetInput.blur();
-                            targetInput.readOnly = true;
-                            targetInput.style.pointerEvents = 'none';
-                            if (callback) callback();
-                        }}, 50);
-                    }}, 50);
-                }} else {{
-                    if (callback) callback();
-                }}
-            }} catch (e) {{
-                console.error('setInputValue error:', e);
-                if (callback) callback();
-            }}
-        }}
-
-        document.getElementById('setBtn_{idx}').addEventListener('click', function() {{
-            var start = localStorage.getItem('wf_region_start');
-            var end = localStorage.getItem('wf_region_end');
-            if (start === null || end === null) {{
-                alert('파형 그래프에서 설정된 영역을 찾을 수 없습니다.');
-                return;
-            }}
-            setInputValue('시작(초) #{idx+1}', start, function() {{
-                setTimeout(function() {{
-                    setInputValue('종료(초) #{idx+1}', end, null);
-                }}, 200);
-            }});
-        }});
-
-        document.getElementById('pasteBtn_{idx}').addEventListener('click', function() {{
-            var clip = localStorage.getItem('wf_clipboard');
-            if (!clip) {{
-                alert('먼저 파형에서 "모두 복사" 버튼을 눌러주세요.');
-                return;
-            }}
-            var parts = clip.split(',');
-            if (parts.length === 2) {{
-                var sv = parseFloat(parts[0].trim());
-                var ev = parseFloat(parts[1].trim());
-                if (!isNaN(sv) && !isNaN(ev)) {{
-                    setInputValue('시작(초) #{idx+1}', sv.toFixed(2), function() {{
-                        setTimeout(function() {{
-                            setInputValue('종료(초) #{idx+1}', ev.toFixed(2), null);
-                        }}, 200);
-                    }});
-                }} else {{
-                    alert('시간 형식이 올바르지 않습니다.');
-                }}
-            }} else {{
-                alert('붙여넣을 데이터 형식이 올바르지 않습니다.\n먼저 파형에서 "모두 복사"를 눌러주세요.');
-            }}
-        }});
-        </script>
-        """
-        st.components.v1.html(html_code, height=72, scrolling=False)
+    pass  # 구버전 렌더링 함수 제거 (Native Streamlit Button 형태로 대체)
 
     st.markdown("""
     엑셀 파일과 통 오디오 파일(.mp3)을 업로드하여 각 문장별로 사운드를 끊어냅니다.  
@@ -1882,363 +1531,39 @@ with tab9:
             st.write("### 📊 사운드 진동 파형 (시작/종료점 영역 설정)")
             st.markdown("파형 양 끝의 **하늘색 막대바**를 드래그하여 조절하거나 파형 위를 **드래그**하여 영역(Region)을 설정하세요. 설정한 구간은 자동으로 **반복 재생**됩니다.")
             
+            import streamlit.components.v1 as components
             import base64
             audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
             
-            waveform_html = f"""
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-            <style>
-                body {{
-                    margin: 0;
-                    padding: 10px;
-                    background-color: #0e1117;
-                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    color: #fafafa;
-                }}
-                .wave-container {{
-                    background: #00162b;
-                    border: 1px solid #002d54;
-                    border-radius: 8px;
-                    padding: 15px;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-                }}
-                #waveform {{
-                    background: #000f1f;
-                    border-radius: 6px;
-                    padding: 5px;
-                    border: 1px solid #002447;
-                }}
-                .control-bar {{
-                    display: flex;
-                    flex-wrap: wrap;
-                    align-items: center;
-                    justify-content: space-between;
-                    gap: 15px;
-                    margin-top: 15px;
-                    padding-top: 15px;
-                    border-top: 1px solid #002d54;
-                }}
-                .btn-group {{
-                    display: flex;
-                    gap: 8px;
-                }}
-                .btn {{
-                    padding: 8px 16px;
-                    border: none;
-                    border-radius: 6px;
-                    font-weight: 600;
-                    font-size: 13px;
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 6px;
-                    transition: all 0.2s ease;
-                }}
-                .btn-primary {{
-                    background: linear-gradient(135deg, #ff4b4b 0%, #ff7575 100%);
-                    color: white;
-                }}
-                .btn-secondary {{
-                    background: #002447;
-                    color: #fafafa;
-                    border: 1px solid #003b73;
-                }}
-                .btn-secondary:not(:disabled) {{
-                    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-                    color: white !important;
-                    border: 1px solid #047857 !important;
-                    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
-                }}
-                .btn:hover:not(:disabled) {{
-                    opacity: 0.85;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                }}
-                .btn:active:not(:disabled) {{
-                    opacity: 0.7;
-                }}
-                .btn:disabled {{
-                    background: #001224;
-                    color: #475569;
-                    border: 1px solid #001c38;
-                    cursor: not-allowed;
-                }}
-                .info-display {{
-                    font-size: 14px;
-                    color: #94a3b8;
-                    background: #001c38;
-                    padding: 8px 14px;
-                    border-radius: 6px;
-                    border: 1px solid #002d54;
-                    min-width: 150px;
-                    text-align: center;
-                }}
-                .time-span {{
-                    font-weight: bold;
-                    color: #00ffd2;
-                }}
-                .slider-container {{
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    color: #94a3b8;
-                    font-size: 13px;
-                }}
-                .slider-container input[type="range"] {{
-                    accent-color: #00d2ff;
-                    cursor: pointer;
-                }}
-                /* Toast 알림 */
-                .toast {{
-                    position: fixed;
-                    bottom: 20px;
-                    right: 20px;
-                    background: #10b981;
-                    color: white;
-                    padding: 10px 20px;
-                    border-radius: 6px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-                    opacity: 0;
-                    transition: opacity 0.3s ease;
-                    z-index: 9999;
-                }}
-                .toast.show {{
-                    opacity: 1;
-                }}
-                
-                /* Wavesurfer Region 및 Handle Custom Styling */
-                .wavesurfer-region {{
-                    border: 1px dashed rgba(0, 210, 255, 0.4) !important;
-                    background-color: rgba(0, 150, 255, 0.15) !important;
-                }}
-                .wavesurfer-handle {{
-                    width: 6px !important;
-                    background-color: #00d2ff !important;
-                    opacity: 1 !important;
-                    cursor: col-resize;
-                    transition: background-color 0.2s;
-                }}
-                .wavesurfer-handle:hover {{
-                    background-color: #00ffd2 !important;
-                }}
-            </style>
+            # 세션 상태에 영역 초기값 설정
+            if "ws_start" not in st.session_state:
+                st.session_state.ws_start = 0.0
+            if "ws_end" not in st.session_state:
+                st.session_state.ws_end = duration_sec
+
+            # Custom Component 선언 및 로드
+            parent_dir = os.path.dirname(os.path.abspath(__file__))
+            wavesurfer_comp = components.declare_component(
+                "wavesurfer_component",
+                path=os.path.join(parent_dir, "wavesurfer_component")
+            )
             
-            <div class="wave-container">
-                <div id="waveform"></div>
-                
-                <div class="control-bar">
-                    <div class="btn-group">
-                        <button id="playBtn" class="btn btn-primary"><i class="fa-solid fa-play"></i> 재생 / 일시정지</button>
-                    </div>
-                    
-                    <div class="slider-container">
-                        <i class="fa-solid fa-magnifying-glass-minus"></i>
-                        <input type="range" id="zoomSlider" min="10" max="300" value="10" style="width: 120px;">
-                        <i class="fa-solid fa-magnifying-glass-plus"></i>
-                    </div>
+            # Wavesurfer Custom Component 호출
+            component_val = wavesurfer_comp(
+                audio_base64=audio_base64,
+                initial_start=st.session_state.ws_start,
+                initial_end=st.session_state.ws_end,
+                key="wavesurfer_instance"
+            )
 
-                    <div class="info-display">
-                        선택 구간: <span id="region-time" class="time-span">없음 (드래그하세요)</span>
-                    </div>
-
-                    <div class="btn-group">
-                        <button id="copyStartBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 시작 복사</button>
-                        <button id="copyEndBtn" class="btn btn-secondary" disabled><i class="fa-regular fa-copy"></i> 종료 복사</button>
-                        <button id="copyBothBtn" class="btn btn-secondary" disabled><i class="fa-solid fa-copy"></i> 모두 복사</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="toast" class="toast">복사되었습니다!</div>
-
-            <script src="https://unpkg.com/wavesurfer.js@7"></script>
-            <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
-            <script>
-                const audioData = "data:audio/mp3;base64,{audio_base64}";
+            # 컴포넌트 리턴값 처리
+            if component_val:
+                st.session_state.ws_start = component_val.get("start", st.session_state.ws_start)
+                st.session_state.ws_end = component_val.get("end", st.session_state.ws_end)
                 
-                const ws = WaveSurfer.create({{
-                    container: '#waveform',
-                    waveColor: '#00e1b5',
-                    progressColor: '#00d2ff',
-                    url: audioData,
-                    height: 120,
-                    responsive: true
-                }});
-                
-                const wsRegions = ws.registerPlugin(WaveSurfer.Regions.create());
-                
-                let activeRegion = null;
-                let isInitialized = false;
-
-                function initRegionAndUI() {{
-                    if (isInitialized) return;
-                    try {{
-                        const duration = ws.getDuration();
-                        if (!duration || isNaN(duration)) return;
-                        
-                        isInitialized = true;
-                        
-                        // 오디오 로딩 완료 시 가장 좌측(0초)부터 가장 우측(끝)까지 꽉 찬 region 생성
-                        activeRegion = wsRegions.addRegion({{
-                            start: 0,
-                            end: duration,
-                            color: 'rgba(255, 75, 75, 0.25)',
-                            drag: true,
-                            resize: true
-                        }});
-                        updateUI(activeRegion);
-                        
-                        // 부모 리스너의 초기화 지연을 감안하여 500ms, 1500ms 후에 최신 영역값을 안전하게 재전송
-                        setTimeout(() => {{
-                            if (activeRegion) updateUI(activeRegion);
-                        }}, 500);
-                        setTimeout(() => {{
-                            if (activeRegion) updateUI(activeRegion);
-                        }}, 1500);
-                        
-                        // 드래그 선택 기능도 활성화 (영역을 다 지우고 새로 그릴 때 대비)
-                        wsRegions.enableDragSelection({{
-                            color: 'rgba(255, 75, 75, 0.25)',
-                        }});
-                    }} catch (e) {{
-                        console.error("Initialization error in initRegionAndUI:", e);
-                    }}
-                }}
-
-                // decode와 ready 이벤트 모두에 바인딩하여 확실하게 1회 초기화 진행
-                ws.on('decode', () => {{
-                    initRegionAndUI();
-                }});
-
-                ws.on('ready', () => {{
-                    initRegionAndUI();
-                }});
-                
-                // 재생/일시정지 제어
-                document.getElementById('playBtn').addEventListener('click', () => {{
-                    if (activeRegion && !ws.isPlaying()) {{
-                        const curr = ws.getCurrentTime();
-                        if (curr < activeRegion.start || curr > activeRegion.end) {{
-                            ws.setTime(activeRegion.start);
-                        }}
-                    }}
-                    ws.playPause();
-                }});
-                
-                // 줌 제어
-                document.getElementById('zoomSlider').addEventListener('input', (e) => {{
-                    ws.zoom(Number(e.target.value));
-                }});
-                
-                // 반복 재생 제어 (timeupdate 활용)
-                ws.on('timeupdate', () => {{
-                    if (activeRegion && ws.isPlaying()) {{
-                        const curr = ws.getCurrentTime();
-                        if (curr >= activeRegion.end || curr < activeRegion.start) {{
-                            ws.setTime(activeRegion.start);
-                        }}
-                    }}
-                }});
-                
-                wsRegions.on('region-created', (region) => {{
-                    // 단 하나의 영역만 유지
-                    wsRegions.getRegions().forEach(r => {{
-                        if (r !== region) r.destroy();
-                    }});
-                    activeRegion = region;
-                    updateUI(region);
-                }});
-                
-                wsRegions.on('region-updated', (region) => {{
-                    activeRegion = region;
-                    updateUI(region);
-                    
-                    // 조절 중에 재생 바가 영역 밖으로 나가면 영역 시작점으로 복귀
-                    if (ws.isPlaying()) {{
-                        const curr = ws.getCurrentTime();
-                        if (curr < region.start || curr > region.end) {{
-                            ws.setTime(region.start);
-                        }}
-                    }}
-                }});
-                
-                function updateUI(region) {{
-                    const start = region.start.toFixed(2);
-                    const end = region.end.toFixed(2);
-                    
-                    const regionTimeEl = document.getElementById('region-time');
-                    if (regionTimeEl) {{
-                        regionTimeEl.innerHTML = `<span class="time-span">${{start}}s ~ ${{end}}s</span>`;
-                    }}
-                    
-                    // localStorage에 영역 정보 저장 (SET 버튼 릴레이용)
-                    try {{
-                        localStorage.setItem('wf_region_start', start);
-                        localStorage.setItem('wf_region_end', end);
-                    }} catch(e) {{ console.error('localStorage write failed:', e); }}
-                    
-                    const btnStart = document.getElementById('copyStartBtn');
-                    const btnEnd = document.getElementById('copyEndBtn');
-                    const btnBoth = document.getElementById('copyBothBtn');
-                    
-                    if (btnStart && btnEnd && btnBoth) {{
-                        btnStart.disabled = false;
-                        btnEnd.disabled = false;
-                        btnBoth.disabled = false;
-                        
-                        btnStart.onclick = () => copyText(start, '시작 시간', false);
-                        btnEnd.onclick = () => copyText(end, '종료 시간', false);
-                        btnBoth.onclick = () => copyText(start + ', ' + end, '시작 및 종료 시간', true);
-                    }}
-                }}
-                
-                function copyText(text, type, storeForPaste) {{
-                    // PASTE 릴레이용 localStorage 저장 (모두 복사인 경우만)
-                    if (storeForPaste) {{
-                        try {{ localStorage.setItem('wf_clipboard', text); }} catch(e) {{}}
-                    }}
-                    // 시스템 클립보드 복사
-                    if (navigator.clipboard && navigator.clipboard.writeText) {{
-                        navigator.clipboard.writeText(text).then(() => {{
-                            showToast(`${{type}} 복사 완료: ${{text}}`);
-                        }}).catch(() => {{ fallbackCopy(text, type); }});
-                    }} else {{
-                        fallbackCopy(text, type);
-                    }}
-                }}
-                
-                function fallbackCopy(text, type) {{
-                    const textArea = document.createElement("textarea");
-                    textArea.value = text;
-                    textArea.style.position = "fixed";
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    try {{
-                        const successful = document.execCommand('copy');
-                        if (successful) {{
-                            showToast(`${{type}} 복사 완료: ${{text}}`);
-                        }} else {{
-                            alert('복사 실패');
-                        }}
-                    }} catch (err) {{
-                        alert('복사 실패: ' + err);
-                    }}
-                    document.body.removeChild(textArea);
-                }}
-                
-                function showToast(msg) {{
-                    const toast = document.getElementById('toast');
-                    toast.innerText = msg;
-                    toast.classList.add('show');
-                    setTimeout(() => {{
-                        toast.classList.remove('show');
-                    }}, 2000);
-                }}
-            </script>
-            """
-            st.components.v1.html(waveform_html, height=260)
+                # '모두 복사' 액션일 경우 마지막 복사 범위 저장
+                if component_val.get("action") == "copy_both":
+                    st.session_state.last_copied_range = (st.session_state.ws_start, st.session_state.ws_end)
             
             # 3. 편집 인터페이스 설계
             st.write("---")
@@ -2316,7 +1641,8 @@ with tab9:
                                 value=st.session_state.slices_state[idx]["start"], 
                                 step=0.1, 
                                 format="%.2f",
-                                key=f"start_in_{idx}"
+                                key=f"start_in_{idx}",
+                                disabled=True
                             )
                             st.session_state.slices_state[idx]["start"] = start_val
                         with col_num2:
@@ -2327,11 +1653,26 @@ with tab9:
                                 value=st.session_state.slices_state[idx]["end"] if st.session_state.slices_state[idx]["end"] > 0 else 0.0, 
                                 step=0.1, 
                                 format="%.2f",
-                                key=f"end_in_{idx}"
+                                key=f"end_in_{idx}",
+                                disabled=True
                             )
                             st.session_state.slices_state[idx]["end"] = end_val
                         with col_control:
-                            rendering_control_buttons(idx)
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                if st.button("⚙️ SET", key=f"btn_set_{idx}", use_container_width=True):
+                                    st.session_state.slices_state[idx]["start"] = st.session_state.ws_start
+                                    st.session_state.slices_state[idx]["end"] = st.session_state.ws_end
+                                    st.rerun()
+                            with btn_col2:
+                                if st.button("📋 PASTE", key=f"btn_paste_{idx}", use_container_width=True):
+                                    copied = st.session_state.get("last_copied_range")
+                                    if copied:
+                                        st.session_state.slices_state[idx]["start"] = copied[0]
+                                        st.session_state.slices_state[idx]["end"] = copied[1]
+                                        st.rerun()
+                                    else:
+                                        st.warning("복사된 값이 없습니다. 먼저 '모두 복사' 버튼을 클릭하세요.")
                         
                         with col_listen:
                             st.write("🔬 미리듣기")
