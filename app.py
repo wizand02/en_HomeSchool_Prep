@@ -8,6 +8,7 @@ import io
 from pathlib import Path
 import nltk
 import pydub
+import zipfile
 
 # ────────────────────────────────────────────
 # 유틸리티 (수정 및 분석 영역)
@@ -22,6 +23,23 @@ def get_update_filename(original_name: str) -> str:
     """원본 파일명에 _update를 붙인 이름 반환 (확장자 앞에 삽입)"""
     p = Path(original_name)
     return p.stem + "_update" + p.suffix
+
+
+def create_zip_of_directory(directory_path):
+    """지정된 디렉토리 하위의 모든 mp3 파일을 ZIP 바이너리로 압축"""
+    if not os.path.exists(directory_path):
+        return None
+    zip_buffer = io.BytesIO()
+    has_files = False
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for root, dirs, files in os.walk(directory_path):
+            for file in files:
+                if file.endswith('.mp3'):
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, directory_path)
+                    zip_file.write(file_path, relative_path)
+                    has_files = True
+    return zip_buffer.getvalue() if has_files else None
 
 
 # ────────────────────────────────────────────
@@ -1444,6 +1462,18 @@ with tab8:
 
                         st.success(f"🎉 TTS 사운드 파일 생성 완료! (생성됨: {generated_count}개, 건너뜀: {skipped_count}개)")
                         st.info(f"🔊 사운드 파일 저장 위치: `{os.path.abspath(base_output_dir_t8)}`")
+                        
+                        # ZIP 다운로드 지원
+                        zip_data = create_zip_of_directory(base_output_dir_t8)
+                        if zip_data:
+                            st.download_button(
+                                label="📥 생성된 사운드 파일 전체 다운로드 (ZIP)",
+                                data=zip_data,
+                                file_name="listening_sounds_tts.zip",
+                                mime="application/zip",
+                                use_container_width=True,
+                                key="dl_zip_t8"
+                            )
                     except Exception as e:
                         st.error(f"오류 발생: {e}")
 
@@ -1637,6 +1667,18 @@ with tab9:
 
                             st.success(f"🎉 사운드 끊어내기 및 저장 완료! 총 {saved_count}개의 파일이 생성 및 기록되었습니다.")
                             st.info(f"📂 저장 위치: `{os.path.abspath(base_output_dir_t9)}`")
+                            
+                            # ZIP 다운로드 지원
+                            zip_data = create_zip_of_directory(base_output_dir_t9)
+                            if zip_data:
+                                st.download_button(
+                                    label="📥 끊어낸 사운드 파일 전체 다운로드 (ZIP)",
+                                    data=zip_data,
+                                    file_name="listening_sounds_sliced.zip",
+                                    mime="application/zip",
+                                    use_container_width=True,
+                                    key="dl_zip_t9"
+                                )
                         except Exception as e_run:
                             st.error(f"오디오 슬라이싱 실행 중 에러 발생: {e_run}")
         except Exception as e_init:
