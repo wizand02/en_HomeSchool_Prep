@@ -647,108 +647,114 @@ def generate_sounds(df, base_output_dir):
 st.set_page_config(page_title="영어 학습 자료 도구 세트", layout="wide")
 st.title("🎧 영어 학습 자료 처리 도구")
 
-# CORS 우회를 위한 부모 창 리스너 주입 (onerror 트릭)
-inject_js = """
+# CORS 우회를 위한 부모 창 리스너 주입 (onerror 동적 스크립트 생성 방식)
+inject_js = r"""
 <img src="x" onerror="
 if (!window.hasStreamlitListener) {
     window.hasStreamlitListener = true;
-    console.log('Streamlit CORS Bridge Listener Initialized');
+    console.log('Streamlit CORS Bridge Injecting...');
     
-    // 1. 인풋창 락 주기적 감시 및 처리 (부모 창 컨텍스트이므로 보안 에러 없음)
-    function lockInputs() {
-        try {
-            const labels = document.querySelectorAll('label');
-            for (let label of labels) {
-                const text = label.innerText.trim();
-                if (text.startsWith('시작(초) #') || text.startsWith('종료(초) #')) {
-                    const htmlFor = label.getAttribute('for');
-                    const input = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=&quot;stNumberInput&quot;]').querySelector('input[type=&quot;number&quot;]');
-                    if (input && !input.readOnly && document.activeElement !== input) {
-                        input.readOnly = true;
-                        input.style.pointerEvents = 'none';
-                        input.style.backgroundColor = '#161a24';
-                        input.style.color = '#a3a8b4';
+    const scr = document.createElement('script');
+    scr.textContent = `
+        console.log('Streamlit CORS Bridge Script Running');
+        
+        // 1. 인풋창 락 주기적 감시 및 처리 (부모 창 컨텍스트이므로 보안 에러 없음)
+        function lockInputs() {
+            try {
+                const labels = document.querySelectorAll('label');
+                for (let label of labels) {
+                    const text = label.innerText.trim();
+                    if (text.startsWith('시작(초) #') || text.startsWith('종료(초) #')) {
+                        const htmlFor = label.getAttribute('for');
+                        const input = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']').querySelector('input[type=\\'number\\']');
+                        if (input && !input.readOnly && document.activeElement !== input) {
+                            input.readOnly = true;
+                            input.style.pointerEvents = 'none';
+                            input.style.backgroundColor = '#161a24';
+                            input.style.color = '#a3a8b4';
+                        }
                     }
                 }
-            }
-        } catch(e) {}
-    }
-    setInterval(lockInputs, 500);
+            } catch(e) {}
+        }
+        setInterval(lockInputs, 500);
 
-    // 2. 메시지 수신 리스너 등록
-    window.addEventListener('message', (event) => {
-        const data = event.data;
-        if (!data) return;
-        
-        // 인풋 값 설정 요청 처리
-        if (data.type === 'SET_INPUT_VALUE') {
-            const labelText = data.label;
-            const val = data.value;
+        // 2. 메시지 수신 리스너 등록
+        window.addEventListener('message', (event) => {
+            const data = event.data;
+            if (!data) return;
             
-            const labels = document.querySelectorAll('label');
-            let targetInput = null;
-            for (let label of labels) {
-                if (label.innerText.trim() === labelText) {
-                    const htmlFor = label.getAttribute('for');
-                    targetInput = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=&quot;stNumberInput&quot;]').querySelector('input[type=&quot;number&quot;]');
-                    break;
-                }
-            }
-            
-            if (targetInput) {
-                // 강제 쓰기 허용
-                targetInput.readOnly = false;
-                targetInput.style.pointerEvents = 'auto';
-                targetInput.focus();
+            // 인풋 값 설정 요청 처리
+            if (data.type === 'SET_INPUT_VALUE') {
+                const labelText = data.label;
+                const val = data.value;
                 
-                const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
-                const prototype = Object.getPrototypeOf(targetInput);
-                const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-                const setter = valueSetter || prototypeValueSetter;
-                
-                if (setter) {
-                    setter.call(targetInput, val);
-                } else {
-                    targetInput.value = val;
+                const labels = document.querySelectorAll('label');
+                let targetInput = null;
+                for (let label of labels) {
+                    if (label.innerText.trim() === labelText) {
+                        const htmlFor = label.getAttribute('for');
+                        targetInput = htmlFor ? document.getElementById(htmlFor) : label.closest('[data-testid=\\'stNumberInput\\']').querySelector('input[type=\\'number\\']');
+                        break;
+                    }
                 }
                 
-                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-                targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-                
-                setTimeout(() => {
-                    const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-                    const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-                    targetInput.dispatchEvent(keyDown);
-                    targetInput.dispatchEvent(keyUp);
+                if (targetInput) {
+                    // 강제 쓰기 허용
+                    targetInput.readOnly = false;
+                    targetInput.style.pointerEvents = 'auto';
+                    targetInput.focus();
+                    
+                    const valueSetter = Object.getOwnPropertyDescriptor(targetInput, 'value')?.set;
+                    const prototype = Object.getPrototypeOf(targetInput);
+                    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                    const setter = valueSetter || prototypeValueSetter;
+                    
+                    if (setter) {
+                        setter.call(targetInput, val);
+                    } else {
+                        targetInput.value = val;
+                    }
+                    
+                    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                     
                     setTimeout(() => {
-                        targetInput.blur();
-                        targetInput.readOnly = true;
-                        targetInput.style.pointerEvents = 'none';
+                        const keyDown = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                        const keyUp = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                        targetInput.dispatchEvent(keyDown);
+                        targetInput.dispatchEvent(keyUp);
+                        
+                        setTimeout(() => {
+                            targetInput.blur();
+                            targetInput.readOnly = true;
+                            targetInput.style.pointerEvents = 'none';
+                        }, 50);
                     }, 50);
-                }, 50);
+                }
             }
-        }
-        
-        // 클립보드 복사 요청 처리
-        if (data.type === 'COPY_CLIPBOARD') {
-            const text = data.text;
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).catch(err => {
-                    console.error('Clipboard copy fail:', err);
-                });
-            } else {
-                const textArea = document.createElement('textarea');
-                textArea.value = text;
-                textArea.style.position = 'fixed';
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
+            
+            // 클립보드 복사 요청 처리
+            if (data.type === 'COPY_CLIPBOARD') {
+                const text = data.text;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).catch(err => {
+                        console.error('Clipboard copy fail:', err);
+                    });
+                } else {
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    textArea.style.position = 'fixed';
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                }
             }
-        }
-    });
+        });
+    `;
+    document.body.appendChild(scr);
 }
 " style="display:none;">
 """
